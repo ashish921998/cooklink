@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Builds
+dist/
+build/
+.expo/
+*.tsbuildinfo
+
+# Native
+ios/
+android/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Logs
+*.log
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/settings.json
+Thumbs.db
+
+# Coverage
+coverage/
+.nyc_output/
+
+# Local DB
+*.sqlite
+*.db
