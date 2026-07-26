@@ -55,10 +55,11 @@ export class Authorization {
   async authorize(userId: UserId, householdId: HouseholdId): Promise<Principal> {
     const snap = await this.lookup.findActiveMembership(userId, householdId);
     if (!snap) {
-      throw new AuthorizationDeniedError(
-        'You are not an active member of this household.',
-        { userId, householdId, capability: 'read_chat' },
-      );
+      throw new AuthorizationDeniedError('You are not an active member of this household.', {
+        userId,
+        householdId,
+        capability: 'read_chat',
+      });
     }
     if (snap.membership.status !== 'active') {
       throw new AuthorizationDeniedError('Household access has changed.', {
@@ -89,10 +90,11 @@ export class Authorization {
   ): Promise<Principal> {
     const principal = await this.authorize(userId, householdId);
     if (!can(principal.role, capability)) {
-      throw new AuthorizationDeniedError(
-        `Your role cannot perform this action (${capability}).`,
-        { userId, householdId, capability },
-      );
+      throw new AuthorizationDeniedError(`Your role cannot perform this action (${capability}).`, {
+        userId,
+        householdId,
+        capability,
+      });
     }
     return principal;
   }
@@ -101,13 +103,10 @@ export class Authorization {
 /** Runtime assertion that a principal still holds a capability. */
 export function requireCapability(principal: Principal, capability: Capability): void {
   if (!can(principal.role, capability)) {
-    throw new AuthorizationDeniedError(
-      `Your role cannot perform this action (${capability}).`,
-      {
-        userId: principal.userId,
-        householdId: principal.householdId,
-        capability,
-      },
-    );
+    throw new AuthorizationDeniedError(`Your role cannot perform this action (${capability}).`, {
+      userId: principal.userId,
+      householdId: principal.householdId,
+      capability,
+    });
   }
 }

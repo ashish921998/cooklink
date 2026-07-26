@@ -2,11 +2,12 @@
   "name": "cooklink",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "description": "Cooklink — meal planning, cooking, and grocery replenishment for one household and its hired cook.",
   "packageManager": "pnpm@10.15.1",
   "scripts": {
     "build": "tsc -b",
-    "typecheck": "tsc -b --noEmit",
+    "typecheck": "tsc -b",
     "test": "pnpm -r --if-present test",
     "lint": "eslint .",
     "format": "prettier --write .",

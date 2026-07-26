@@ -40,17 +40,8 @@ test('one payment method may be preselected; several require a choice', () => {
 });
 
 test('after uncertainty, never retry if get_orders shows an order already placed', () => {
-  assert.equal(
-    shouldRetryCheckout({ uncertainFailure: true, orderAlreadyPlaced: true }),
-    false,
-  );
-  assert.equal(
-    shouldRetryCheckout({ uncertainFailure: true, orderAlreadyPlaced: false }),
-    true,
-  );
+  assert.equal(shouldRetryCheckout({ uncertainFailure: true, orderAlreadyPlaced: true }), false);
+  assert.equal(shouldRetryCheckout({ uncertainFailure: true, orderAlreadyPlaced: false }), true);
   // a deterministic failure must not be retried blindly
-  assert.equal(
-    shouldRetryCheckout({ uncertainFailure: false, orderAlreadyPlaced: false }),
-    false,
-  );
+  assert.equal(shouldRetryCheckout({ uncertainFailure: false, orderAlreadyPlaced: false }), false);
 });

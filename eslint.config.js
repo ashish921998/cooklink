@@ -10,6 +10,7 @@ export default tseslint.config(
       '**/build/**',
       '**/.expo/**',
       '**/coverage/**',
+      'prototype/**',
       '**/*.config.js',
       '**/expo-env.d.ts',
     ],

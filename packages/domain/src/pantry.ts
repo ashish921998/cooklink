@@ -31,8 +31,7 @@ export function netAvailable(entries: PantryLedgerEntry[], now: Date): NetQuanti
   for (const e of entries) {
     const atMs = Date.parse(e.at);
     const elapsedDays = (nowMs - atMs) / 86_400_000;
-    const spoiled =
-      e.perishable && e.freshnessDays != null && elapsedDays > e.freshnessDays;
+    const spoiled = e.perishable && e.freshnessDays != null && elapsedDays > e.freshnessDays;
     if (spoiled) continue;
     if (e.deltaG) g += e.deltaG;
     if (e.deltaMl) ml += e.deltaMl;

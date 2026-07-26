@@ -17,23 +17,20 @@ test('netAvailable sums deltas', () => {
 });
 
 test('perishables beyond freshness window contribute nothing', () => {
-  const net = netAvailable(
-    [ledger('milk', null, 1000, null, day(6), true, 3)],
-    NOW,
-  );
+  const net = netAvailable([ledger('milk', null, 1000, null, day(6), true, 3)], NOW);
   assert.equal(net.ml, 0); // spoiled after 3 days
 });
 
 test('perishables within window count fully', () => {
-  const net = netAvailable(
-    [ledger('milk', null, 1000, null, day(1), true, 3)],
-    NOW,
-  );
+  const net = netAvailable([ledger('milk', null, 1000, null, day(1), true, 3)], NOW);
   assert.equal(net.ml, 1000);
 });
 
 test('classifyConfidence: unknown when no data', () => {
-  assert.equal(classifyConfidence({ g: 0, ml: 0, count: 0, hasData: false }, emptyNeed()), 'unknown');
+  assert.equal(
+    classifyConfidence({ g: 0, ml: 0, count: 0, hasData: false }, emptyNeed()),
+    'unknown',
+  );
 });
 
 test('classifyConfidence: likely_available when need covered', () => {

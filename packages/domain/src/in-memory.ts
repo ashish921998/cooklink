@@ -8,7 +8,6 @@ import type {
   RecipeId,
   UserId,
 } from './ids.js';
-import type { AuthorizationLookup } from './authorization.js';
 import type { Repository } from './repository.js';
 import type {
   ActionSuggestion,
@@ -146,7 +145,12 @@ export class InMemoryRepository implements Repository {
   }
   async removeMembership(membershipId: MembershipId): Promise<void> {
     const m = this.memberships.get(membershipId as string);
-    if (m) this.memberships.set(membershipId as string, { ...m, status: 'removed', removedAt: this.now() });
+    if (m)
+      this.memberships.set(membershipId as string, {
+        ...m,
+        status: 'removed',
+        removedAt: this.now(),
+      });
   }
   async countActiveCooks(householdId: HouseholdId): Promise<number> {
     return [...this.memberships.values()].filter(
@@ -373,7 +377,10 @@ export class InMemoryRepository implements Repository {
   ): Promise<void> {
     this.ledger.push({ ...entry, id: crypto.randomUUID(), householdId });
   }
-  async listPantryLedger(householdId: HouseholdId, ingredientKey: string): Promise<PantryLedgerEntry[]> {
+  async listPantryLedger(
+    householdId: HouseholdId,
+    ingredientKey: string,
+  ): Promise<PantryLedgerEntry[]> {
     return this.ledger
       .filter((e) => e.householdId === householdId && e.ingredientKey === ingredientKey)
       .sort((a, b) => a.at.localeCompare(b.at));
@@ -441,7 +448,8 @@ export class InMemoryRepository implements Repository {
     patch: { body?: string | null; caption?: string | null },
   ): Promise<ChatMessage> {
     const m = this.messages.get(msgId as string);
-    if (!m || m.householdId !== householdId || m.senderId !== senderId) throw new Error('forbidden');
+    if (!m || m.householdId !== householdId || m.senderId !== senderId)
+      throw new Error('forbidden');
     const updated = { ...m, ...patch, editedAt: this.now() };
     this.messages.set(m.id as string, updated);
     return updated;
@@ -452,7 +460,8 @@ export class InMemoryRepository implements Repository {
     senderId: MembershipId,
   ): Promise<ChatMessage> {
     const m = this.messages.get(msgId as string);
-    if (!m || m.householdId !== householdId || m.senderId !== senderId) throw new Error('forbidden');
+    if (!m || m.householdId !== householdId || m.senderId !== senderId)
+      throw new Error('forbidden');
     const updated = { ...m, deletedAt: this.now(), mediaRef: null };
     this.messages.set(m.id as string, updated);
     return updated;
@@ -496,7 +505,9 @@ export class InMemoryRepository implements Repository {
     return this.suggestions.get(id) ?? null;
   }
   async listPendingSuggestions(authorId: MembershipId): Promise<ActionSuggestion[]> {
-    return [...this.suggestions.values()].filter((s) => s.authorId === authorId && s.status === 'pending');
+    return [...this.suggestions.values()].filter(
+      (s) => s.authorId === authorId && s.status === 'pending',
+    );
   }
   async updateSuggestionStatus(
     householdId: HouseholdId,
@@ -535,7 +546,11 @@ export class InMemoryRepository implements Repository {
   async createOrder(
     householdId: HouseholdId,
     placedById: MembershipId,
-    input: { providerOrderId: string | null; status: GroceryOrder['status']; totalCents: number | null },
+    input: {
+      providerOrderId: string | null;
+      status: GroceryOrder['status'];
+      totalCents: number | null;
+    },
   ): Promise<GroceryOrder> {
     const o: GroceryOrder = {
       id: id<'GroceryOrderId'>(crypto.randomUUID()),

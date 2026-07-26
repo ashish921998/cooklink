@@ -16,16 +16,17 @@ test('resolveLevel: override wins over default', () => {
 
 test('muted level never pushes events', () => {
   assert.equal(
-    shouldPushEvent('muted', { type: 'grocery_request.created', role: 'member', sameDayMeal: false }),
+    shouldPushEvent('muted', {
+      type: 'grocery_request.created',
+      role: 'member',
+      sameDayMeal: false,
+    }),
     false,
   );
 });
 
 test('member important-only: same-day meal change pushes, future does not', () => {
-  assert.equal(
-    isImportantEvent({ type: 'meal.changed', role: 'member', sameDayMeal: true }),
-    true,
-  );
+  assert.equal(isImportantEvent({ type: 'meal.changed', role: 'member', sameDayMeal: true }), true);
   assert.equal(
     isImportantEvent({ type: 'meal.changed', role: 'member', sameDayMeal: false }),
     false,
@@ -37,10 +38,7 @@ test('cook important-only: request approvals and same-day meals; routine future 
     isImportantEvent({ type: 'grocery_request.approved', role: 'cook', sameDayMeal: false }),
     true,
   );
-  assert.equal(
-    isImportantEvent({ type: 'meal.changed', role: 'cook', sameDayMeal: false }),
-    false,
-  );
+  assert.equal(isImportantEvent({ type: 'meal.changed', role: 'cook', sameDayMeal: false }), false);
 });
 
 test('money/order event previews are always redacted even with previews on', () => {
@@ -76,7 +74,11 @@ test('hidePreviews produces generic text with no detail', () => {
 
 test('actor never receives their own push', () => {
   assert.equal(
-    shouldDeliverToRecipient(true, 'all', { type: 'grocery_request.created', role: 'cook', sameDayMeal: false }),
+    shouldDeliverToRecipient(true, 'all', {
+      type: 'grocery_request.created',
+      role: 'cook',
+      sameDayMeal: false,
+    }),
     false,
   );
 });

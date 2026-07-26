@@ -34,17 +34,7 @@ const GROCERY_WORDS = [
   'मंगवा',
 ];
 
-const MEAL_WORDS = [
-  'change',
-  'swap',
-  'replace',
-  'banā',
-  'bana',
-  'बदल',
-  'बना',
-  'बदलो',
-  'रख',
-];
+const MEAL_WORDS = ['change', 'swap', 'replace', 'banā', 'bana', 'बदल', 'बना', 'बदलो', 'रख'];
 
 const MEAL_TYPE_WORDS: { word: string; mealType: MealType }[] = [
   { word: 'breakfast', mealType: 'breakfast' },
@@ -74,8 +64,7 @@ export function detectIntent(raw: string): ChatIntent {
   }
 
   if (MEAL_WORDS.some((w) => text.includes(w))) {
-    const mealType =
-      MEAL_TYPE_WORDS.find((mt) => text.includes(mt.word))?.mealType ?? null;
+    const mealType = MEAL_TYPE_WORDS.find((mt) => text.includes(mt.word))?.mealType ?? null;
     const meal = extractMealName(raw);
     return { kind: 'meal_change', date: null, mealType, meal };
   }
@@ -84,7 +73,6 @@ export function detectIntent(raw: string): ChatIntent {
 }
 
 function extractItem(raw: string, triggers: string[]): string {
-  const lower = raw.toLowerCase();
   let cleaned = raw;
   // Remove ALL trigger words found (Hindi places the item before the verb,
   // English after it; removing every trigger leaves the noun phrase).
@@ -96,19 +84,45 @@ function extractItem(raw: string, triggers: string[]): string {
     }
   }
   const fillers = [
-    'i', 'me', 'mujhe', 'mujhko', 'मुझे', 'मुझको', 'to', 'please', 'कृपया',
-    'कोई', 'some', 'a', 'थोड़ा', 'little', 'want', 'चाहिए',
+    'i',
+    'me',
+    'mujhe',
+    'mujhko',
+    'मुझे',
+    'मुझको',
+    'to',
+    'please',
+    'कृपया',
+    'कोई',
+    'some',
+    'a',
+    'थोड़ा',
+    'little',
+    'want',
+    'चाहिए',
   ];
-  let tokens = cleaned
+  const tokens = cleaned
     .split(/\s+/)
     .filter((t) => t && !fillers.includes(t.toLowerCase()))
     .map((t) => t.replace(/\b\d+\s?(kg|g|ltr|ml|litre|packet|pack|पैकेट)?\b/gi, '').trim())
     .filter(Boolean);
-  const item = tokens.join(' ').replace(/[,.;].*$/, '').trim();
+  const item = tokens
+    .join(' ')
+    .replace(/[,.;].*$/, '')
+    .trim();
   // Generic grocery words with no specific item → ask "what do you need?".
   const generic = [
-    'grocery', 'groceries', 'kirana', 'सामान', 'किराना', 'कुछ',
-    'something', 'stuff', 'items', 'things', 'सब्ज़ी',
+    'grocery',
+    'groceries',
+    'kirana',
+    'सामान',
+    'किराना',
+    'कुछ',
+    'something',
+    'stuff',
+    'items',
+    'things',
+    'सब्ज़ी',
   ];
   if (!item || generic.includes(item.toLowerCase())) return '';
   return item;
@@ -129,6 +143,8 @@ function extractMealName(raw: string): string | null {
  * Turn a grocery intent into the role-appropriate suggestion. A Cook creates a
  * Grocery Request; a Member is offered "Add to Suggested Cart" (issue 06, AC#4).
  */
-export function roleForGroceryIntent(role: 'owner' | 'member' | 'cook'): 'grocery_request' | 'add_to_cart' {
+export function roleForGroceryIntent(
+  role: 'owner' | 'member' | 'cook',
+): 'grocery_request' | 'add_to_cart' {
   return role === 'cook' ? 'grocery_request' : 'add_to_cart';
 }

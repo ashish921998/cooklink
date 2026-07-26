@@ -1,0 +1,30 @@
+{
+  "name": "@cooklink/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
+    "secrets:check": "node --import tsx src/secrets-check.ts"
+  },
+  "dependencies": {
+    "@clerk/backend": "^1.23.7",
+    "@cooklink/db": "workspace:*",
+    "@cooklink/domain": "workspace:*",
+    "@hono/node-server": "^1.13.7",
+    "drizzle-orm": "^0.36.4",
+    "hono": "^4.6.10",
+    "mysql2": "^3.11.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  }
+}

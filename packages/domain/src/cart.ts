@@ -9,7 +9,7 @@ import type {
   Recipe,
   SuggestedCartItem,
 } from './types.js';
-import { type NetQuantity, addNeed, classifyConfidence, emptyNeed, netAvailable } from './pantry.js';
+import { type NetQuantity, classifyConfidence, emptyNeed, netAvailable } from './pantry.js';
 import { dependableIngredients } from './recipes.js';
 
 /**
@@ -106,9 +106,7 @@ export function buildSuggestedCart(input: CartInput): CartDraft[] {
   // 3. Approved Grocery Requests override the pantry (issue 05, AC#5).
   for (const req of input.approvedRequests) {
     const key = req.quantityText ? null : null; // matching is deferred to order time
-    const existing = req.quantityText
-      ? null
-      : drafts.find((d) => d.groceryRequestId === req.id);
+    const existing = req.quantityText ? null : drafts.find((d) => d.groceryRequestId === req.id);
     if (existing) continue;
     // If the request names an ingredient already in the cart, attach to it.
     const matched = drafts.find(
@@ -118,8 +116,10 @@ export function buildSuggestedCart(input: CartInput): CartDraft[] {
       matched.groceryRequestId = req.id;
       continue;
     }
-    const entries = key ? input.pantryByIngredient.get(key) ?? [] : [];
-    const confidence = key ? classifyConfidence(netAvailable(entries, now), emptyNeed()) : 'unknown';
+    const entries = key ? (input.pantryByIngredient.get(key) ?? []) : [];
+    const confidence = key
+      ? classifyConfidence(netAvailable(entries, now), emptyNeed())
+      : 'unknown';
     drafts.push({
       ingredientKey: key,
       groceryRequestId: req.id,

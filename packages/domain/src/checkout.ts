@@ -12,11 +12,7 @@ import type { SystemEventType } from './types.js';
 /** ₹1,000 in paise (the conservative V1 boundary). */
 export const CART_VALUE_LIMIT_CENTS = 100_000;
 
-export type CheckoutDecisionReason =
-  | 'eligible'
-  | 'over_limit'
-  | 'no_payment_method'
-  | 'disabled';
+export type CheckoutDecisionReason = 'eligible' | 'over_limit' | 'no_payment_method' | 'disabled';
 
 export interface CheckoutDecision {
   eligible: boolean;

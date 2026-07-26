@@ -1,12 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  Authorization,
-  AuthorizationDeniedError,
-  InMemoryRepository,
-  id,
-} from '../index.js';
-import type { HouseholdId, UserId } from '../ids.js';
+import { Authorization, AuthorizationDeniedError, InMemoryRepository, id } from '../index.js';
 
 /**
  * The mandatory backend authorization isolation suite (issue 06 AC#22,
@@ -102,7 +96,15 @@ test('meal plan is household-scoped', async () => {
   const { repo, ha, hb, cookAMembership } = await twoHouseholds();
   await repo.upsertPlannedMeal(
     ha.household.id,
-    { date: '2026-01-01', mealType: 'breakfast', recipeId: null, name: 'Poha', servings: 4, servingsOverridden: false, isSpecial: false },
+    {
+      date: '2026-01-01',
+      mealType: 'breakfast',
+      recipeId: null,
+      name: 'Poha',
+      servings: 4,
+      servingsOverridden: false,
+      isSpecial: false,
+    },
     cookAMembership.id,
   );
   const inA = await repo.listMealsForDay(ha.household.id, '2026-01-01');

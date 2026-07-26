@@ -66,8 +66,7 @@ export const capabilities = {
   canEditMealPlan: (role: HouseholdRole) => can(role, 'edit_meal_plan'),
   canCreateGroceryRequest: (role: HouseholdRole) => can(role, 'create_grocery_request'),
   canApproveRejectRequest: (role: HouseholdRole) => can(role, 'approve_reject_request'),
-  canEditCancelPendingRequest: (role: HouseholdRole) =>
-    can(role, 'edit_cancel_pending_request'),
+  canEditCancelPendingRequest: (role: HouseholdRole) => can(role, 'edit_cancel_pending_request'),
   canManageCart: (role: HouseholdRole) => can(role, 'add_to_cart'),
   canCheckout: canTriggerCheckout,
   canManageMembership: (role: HouseholdRole) => can(role, 'manage_membership'),

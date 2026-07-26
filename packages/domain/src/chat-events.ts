@@ -16,11 +16,7 @@ export function mealChangedPayload(date: string, mealType: string, name: string)
 export function mealPlanBulkPayload(count: number, fromDay: string) {
   return { count, fromDay };
 }
-export function groceryRequestPayload(
-  item: string,
-  quantity: string | null,
-  status: string,
-) {
+export function groceryRequestPayload(item: string, quantity: string | null, status: string) {
   return { item, quantity, status };
 }
 /** Order events deliberately omit money (issue 06, AC#16/24). */
@@ -31,11 +27,15 @@ export function membershipPayload(role: string, displayName?: string) {
   return { role, ...(displayName ? { displayName } : {}) };
 }
 
-const STRINGS: Record<Language, Partial<Record<SystemEventType, (p: Record<string, unknown>) => string>>> = {
+const STRINGS: Record<
+  Language,
+  Partial<Record<SystemEventType, (p: Record<string, unknown>) => string>>
+> = {
   en: {
     'meal.changed': (p) => `${cap(String(p.mealType))} on ${p.date} is now ${p.name}.`,
     'meal_plan.bulk_updated': (p) => `${p.count} meals were updated from ${p.fromDay}.`,
-    'grocery_request.created': (p) => `Grocery request: ${p.item}${p.quantity ? ` (${p.quantity})` : ''}.`,
+    'grocery_request.created': (p) =>
+      `Grocery request: ${p.item}${p.quantity ? ` (${p.quantity})` : ''}.`,
     'grocery_request.updated': (p) => `Grocery request updated: ${p.item}.`,
     'grocery_request.cancelled': (p) => `Grocery request cancelled: ${p.item}.`,
     'grocery_request.approved': (p) => `Grocery request approved: ${p.item}.`,
@@ -51,7 +51,8 @@ const STRINGS: Record<Language, Partial<Record<SystemEventType, (p: Record<strin
   hi: {
     'meal.changed': (p) => `${p.date} को ${hiMeal(String(p.mealType))} अब ${p.name} है।`,
     'meal_plan.bulk_updated': (p) => `${p.fromDay} से ${p.count} भोजन बदले गए।`,
-    'grocery_request.created': (p) => `सामान का अनुरोध: ${p.item}${p.quantity ? ` (${p.quantity})` : ''}।`,
+    'grocery_request.created': (p) =>
+      `सामान का अनुरोध: ${p.item}${p.quantity ? ` (${p.quantity})` : ''}।`,
     'grocery_request.updated': (p) => `सामान का अनुरोध बदला: ${p.item}।`,
     'grocery_request.cancelled': (p) => `सामान का अनुरोध रद्द: ${p.item}।`,
     'grocery_request.approved': (p) => `सामान का अनुरोध स्वीकृत: ${p.item}।`,

@@ -1,0 +1,18 @@
+{
+  "expo": {
+    "name": "Cooklink",
+    "slug": "cooklink",
+    "scheme": "cooklink",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.cooklink.app"
+    },
+    "android": {
+      "package": "com.cooklink.app"
+    },
+    "plugins": ["expo-router", "expo-secure-store"]
+  }
+}

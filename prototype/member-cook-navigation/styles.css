@@ -29,9 +29,8 @@ body {
   color: var(--ink);
   background:
     radial-gradient(circle at 14% 18%, rgba(223, 240, 180, 0.75), transparent 25rem),
-    radial-gradient(circle at 86% 72%, rgba(242, 163, 58, 0.2), transparent 25rem),
-    #e9e6dd;
-  font-family: "DM Sans", sans-serif;
+    radial-gradient(circle at 86% 72%, rgba(242, 163, 58, 0.2), transparent 25rem), #e9e6dd;
+  font-family: 'DM Sans', sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -249,7 +248,7 @@ input:focus-visible {
 .list-header h1,
 .chat-header h1 {
   margin: 2px 0 0;
-  font-family: "DM Serif Display", serif;
+  font-family: 'DM Serif Display', serif;
   font-size: 27px;
   font-weight: 400;
   line-height: 1.05;
@@ -257,7 +256,7 @@ input:focus-visible {
 
 .chat-header h1 {
   overflow: hidden;
-  font-family: "DM Sans", sans-serif;
+  font-family: 'DM Sans', sans-serif;
   font-size: 15px;
   font-weight: 700;
   text-overflow: ellipsis;
@@ -304,7 +303,7 @@ input:focus-visible {
   border: 2px solid var(--paper);
   border-radius: 50%;
   background: var(--mango);
-  content: "";
+  content: '';
 }
 
 .icon-button.trailing {
@@ -712,7 +711,7 @@ input:focus-visible {
   align-items: center;
   gap: 6px;
   color: var(--leaf);
-  font-family: "DM Serif Display", serif;
+  font-family: 'DM Serif Display', serif;
   font-size: 18px;
 }
 
@@ -900,7 +899,9 @@ input:focus-visible {
   background:
     linear-gradient(rgba(247, 244, 235, 0.91), rgba(247, 244, 235, 0.91)),
     radial-gradient(circle, #798378 1px, transparent 1px);
-  background-size: auto, 18px 18px;
+  background-size:
+    auto,
+    18px 18px;
 }
 
 .day-chip {
@@ -1076,7 +1077,7 @@ input:focus-visible {
 
 .cook-today-title h2 {
   margin: 3px 0 0;
-  font-family: "DM Serif Display", serif;
+  font-family: 'DM Serif Display', serif;
   font-size: 25px;
   font-weight: 400;
 }
@@ -1178,7 +1179,7 @@ input:focus-visible {
 
 .variant-b .hero-today h2 {
   margin: 5px 0 0;
-  font-family: "DM Serif Display", serif;
+  font-family: 'DM Serif Display', serif;
   font-size: 31px;
   font-weight: 400;
 }
@@ -1384,9 +1385,7 @@ input:focus-visible {
   padding: 19px;
   border-radius: 20px;
   color: #fff;
-  background:
-    linear-gradient(120deg, rgba(36, 93, 59, 0.98), rgba(61, 117, 74, 0.92)),
-    #245d3b;
+  background: linear-gradient(120deg, rgba(36, 93, 59, 0.98), rgba(61, 117, 74, 0.92)), #245d3b;
 }
 
 .editorial-intro span {
@@ -1398,7 +1397,7 @@ input:focus-visible {
 
 .editorial-intro h2 {
   margin: 7px 0 0;
-  font-family: "DM Serif Display", serif;
+  font-family: 'DM Serif Display', serif;
   font-size: 29px;
   font-weight: 400;
   line-height: 1.06;

@@ -1,17 +1,12 @@
-import type {
-  AuthorizationLookup,
-} from './authorization.js';
+import type { AuthorizationLookup } from './authorization.js';
 import type {
   ChatMessageId,
-  DeviceId,
   GroceryOrderId,
   GroceryRequestId,
   HouseholdId,
   MembershipId,
   PlannedMealId,
   RecipeId,
-  SuggestionId,
-  SystemEventId,
   UserId,
 } from './ids.js';
 import type {
@@ -49,7 +44,9 @@ export interface Repository extends AuthorizationLookup {
   getUserByClerkId(clerkUserId: string): Promise<User | null>;
   createUser(user: Omit<User, 'createdAt'> & { createdAt?: string }): Promise<User>;
   getHousehold(householdId: HouseholdId): Promise<Household | null>;
-  listHouseholdsForUser(userId: UserId): Promise<{ household: Household; membership: Membership }[]>;
+  listHouseholdsForUser(
+    userId: UserId,
+  ): Promise<{ household: Household; membership: Membership }[]>;
   createHousehold(
     household: Omit<Household, 'id' | 'createdAt' | 'closedAt'>,
     ownerId: UserId,
@@ -134,7 +131,10 @@ export interface Repository extends AuthorizationLookup {
     state: SuggestedCartItem['memberState'],
     reason: SuggestedCartItem['removalReason'] | null,
   ): Promise<void>;
-  appendPantryLedger(householdId: HouseholdId, entry: Omit<PantryLedgerEntry, 'id' | 'householdId'>): Promise<void>;
+  appendPantryLedger(
+    householdId: HouseholdId,
+    entry: Omit<PantryLedgerEntry, 'id' | 'householdId'>,
+  ): Promise<void>;
   listPantryLedger(householdId: HouseholdId, ingredientKey: string): Promise<PantryLedgerEntry[]>;
 
   // ---- chat ----
@@ -167,10 +167,7 @@ export interface Repository extends AuthorizationLookup {
     id: ChatMessageId,
     senderId: MembershipId,
   ): Promise<ChatMessage>;
-  setTranscript(
-    messageId: ChatMessageId,
-    transcript: VoiceTranscript,
-  ): Promise<VoiceTranscript>;
+  setTranscript(messageId: ChatMessageId, transcript: VoiceTranscript): Promise<VoiceTranscript>;
   appendSystemEvent(
     householdId: HouseholdId,
     event: Omit<SystemEvent, 'id' | 'createdAt' | 'householdId'>,
@@ -190,10 +187,7 @@ export interface Repository extends AuthorizationLookup {
   ): Promise<void>;
 
   // ---- member state + devices ----
-  getMemberState(
-    userId: UserId,
-    householdId: HouseholdId,
-  ): Promise<HouseholdMemberState | null>;
+  getMemberState(userId: UserId, householdId: HouseholdId): Promise<HouseholdMemberState | null>;
   markRead(userId: UserId, householdId: HouseholdId, upTo: ChatMessageId): Promise<void>;
   registerDevice(device: Omit<DeviceRegistration, 'id'>): Promise<DeviceRegistration>;
   listDevices(userId: UserId): Promise<DeviceRegistration[]>;
@@ -202,7 +196,11 @@ export interface Repository extends AuthorizationLookup {
   createOrder(
     householdId: HouseholdId,
     placedById: MembershipId,
-    input: { providerOrderId: string | null; status: GroceryOrder['status']; totalCents: number | null },
+    input: {
+      providerOrderId: string | null;
+      status: GroceryOrder['status'];
+      totalCents: number | null;
+    },
   ): Promise<GroceryOrder>;
   getOrder(id: GroceryOrderId | string): Promise<GroceryOrder | null>;
   listOrders(householdId: HouseholdId): Promise<GroceryOrder[]>;

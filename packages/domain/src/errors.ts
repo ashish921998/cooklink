@@ -39,7 +39,10 @@ export class NotFoundError extends DomainError {
 }
 
 export class ConflictError extends DomainError {
-  constructor(message: string, public readonly current?: unknown) {
+  constructor(
+    message: string,
+    public readonly current?: unknown,
+  ) {
     super(message, 'conflict');
     this.name = 'ConflictError';
   }

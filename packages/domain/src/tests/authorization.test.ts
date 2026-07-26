@@ -50,7 +50,7 @@ test('authorize denies a non-member', async () => {
 });
 
 test('authorize denies a removed member immediately (access changed)', async () => {
-  const { repo, auth, user, household } = await setup();
+  const { repo, auth, household } = await setup();
   const cook = await repo.createUser({
     id: id<'UserId'>('u-cook'),
     clerkUserId: 'c-2',

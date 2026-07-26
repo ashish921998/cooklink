@@ -122,12 +122,7 @@ export interface PlannedMeal {
 }
 
 export type GroceryRequestStatus =
-  | 'pending'
-  | 'approved'
-  | 'rejected'
-  | 'cancelled'
-  | 'in_order'
-  | 'fulfilled';
+  'pending' | 'approved' | 'rejected' | 'cancelled' | 'in_order' | 'fulfilled';
 
 export interface GroceryRequest {
   id: GroceryRequestId;
@@ -161,10 +156,7 @@ export interface SuggestedCartItem {
 }
 
 export type LedgerDeltaSource =
-  | 'order_delivered'
-  | 'consumption'
-  | 'request_override'
-  | 'member_edit';
+  'order_delivered' | 'consumption' | 'request_override' | 'member_edit';
 
 export interface PantryLedgerEntry {
   id: string;

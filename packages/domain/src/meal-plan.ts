@@ -1,10 +1,4 @@
-import type {
-  DietStyle,
-  ISODate,
-  MealStyle,
-  MealType,
-  PlannedMeal,
-} from './types.js';
+import type { DietStyle, ISODate, MealStyle, MealType, PlannedMeal } from './types.js';
 import { MEAL_TYPES, mostRestrictive } from './types.js';
 import { addDays } from './cart.js';
 
@@ -84,7 +78,7 @@ export function generateStarterPlan(today: ISODate, seed: PlanSeed): PlannedMeal
   const out: PlannedMealDraft[] = [];
   const pool = SEED[seed.mealStyle][seed.dietStyle];
   const used: string[] = [];
-  let specialDay = seed.specialMealEnabled ? 5 : -1; // ~once per week
+  const specialDay = seed.specialMealEnabled ? 5 : -1; // ~once per week
   for (let d = 0; d < 7; d++) {
     for (const mealType of MEAL_TYPES) {
       const candidates = pool[mealType];
@@ -130,7 +124,10 @@ function shuffle<T>(arr: T[]): T[] {
  * Swap two planned meals: exchange recipe identity/name while each slot keeps
  * its day, meal type, servings, and grocery timing context (issue 04, Swap).
  */
-export function swapMealIdentities(a: PlannedMeal, b: PlannedMeal): {
+export function swapMealIdentities(
+  a: PlannedMeal,
+  b: PlannedMeal,
+): {
   a: Partial<PlannedMeal>;
   b: Partial<PlannedMeal>;
 } {
@@ -141,9 +138,7 @@ export function swapMealIdentities(a: PlannedMeal, b: PlannedMeal): {
 }
 
 export type RegenerateScope =
-  | { kind: 'meal' }
-  | { kind: 'day' }
-  | { kind: 'remaining_week'; fromDate: ISODate };
+  { kind: 'meal' } | { kind: 'day' } | { kind: 'remaining_week'; fromDate: ISODate };
 
 /**
  * Regenerate never changes completed past meals and keeps manually edited
