@@ -11,6 +11,7 @@ export * from './chat-events.js';
 export * from './chat-lifecycle.js';
 export * from './chat-media.js';
 export * from './notifications.js';
+export * from './push-dispatch.js';
 export * from './checkout.js';
 export * from './intent.js';
 export * from './meal-plan.js';

@@ -5,6 +5,7 @@ import {
   type ActionSuggestion,
   type ChatMessage,
   type ChatMessageId,
+  type DeviceId,
   type DeviceRegistration,
   type GroceryOrder,
   type GroceryOrderId,
@@ -699,6 +700,28 @@ export class DrizzleRepository implements Repository {
       .values({ userId, householdId, lastReadMessageId: upTo })
       .onDuplicateKeyUpdate({ set: { lastReadMessageId: upTo } });
   }
+  async setNotificationOverride(
+    userId: UserId,
+    householdId: HouseholdId,
+    override: HouseholdMemberState['notificationOverride'],
+  ) {
+    await this.db
+      .insert(s.householdMemberState)
+      .values({ userId, householdId, notificationOverride: override })
+      .onDuplicateKeyUpdate({ set: { notificationOverride: override } });
+    const [row] = await this.db
+      .select()
+      .from(s.householdMemberState)
+      .where(
+        and(
+          eq(s.householdMemberState.userId, userId),
+          eq(s.householdMemberState.householdId, householdId),
+        ),
+      )
+      .limit(1);
+    if (!row) throw new Error('set_notification_override_failed');
+    return memberState(row);
+  }
 
   async registerDevice(device: Omit<DeviceRegistration, 'id'>) {
     const deviceId = id<'DeviceId'>(randomUUID());
@@ -732,6 +755,12 @@ export class DrizzleRepository implements Repository {
       .from(s.deviceRegistrations)
       .where(eq(s.deviceRegistrations.userId, userId));
     return rows.map(deviceRegistration);
+  }
+  async invalidateDevice(deviceId: DeviceId) {
+    await this.db
+      .update(s.deviceRegistrations)
+      .set({ invalidatedAt: new Date() })
+      .where(eq(s.deviceRegistrations.id, deviceId));
   }
 
   async createOrder(

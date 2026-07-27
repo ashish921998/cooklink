@@ -1,6 +1,7 @@
 import { id } from './ids.js';
 import type {
   ChatMessageId,
+  DeviceId,
   GroceryOrderId,
   GroceryRequestId,
   HouseholdId,
@@ -20,6 +21,7 @@ import type {
   IdempotencyKeyRecord,
   CheckoutAuditRecord,
   Membership,
+  NotificationLevel,
   PantryLedgerEntry,
   PlannedMeal,
   Recipe,
@@ -553,6 +555,26 @@ export class InMemoryRepository implements Repository {
       lastReadMessageId: upTo,
       notificationOverride: existing?.notificationOverride ?? null,
     });
+  }
+  async setNotificationOverride(
+    userId: UserId,
+    householdId: HouseholdId,
+    override: NotificationLevel | null,
+  ): Promise<HouseholdMemberState> {
+    const key = `${userId}:${householdId}`;
+    const existing = this.memberState.get(key);
+    const state: HouseholdMemberState = {
+      userId,
+      householdId,
+      lastReadMessageId: existing?.lastReadMessageId ?? null,
+      notificationOverride: override,
+    };
+    this.memberState.set(key, state);
+    return state;
+  }
+  async invalidateDevice(deviceId: DeviceId): Promise<void> {
+    const d = this.devices.get(deviceId as string);
+    if (d) this.devices.set(deviceId as string, { ...d, invalidatedAt: this.now() });
   }
   async registerDevice(device: Omit<DeviceRegistration, 'id'>): Promise<DeviceRegistration> {
     const d: DeviceRegistration = { ...device, id: id<'DeviceId'>(crypto.randomUUID()) };

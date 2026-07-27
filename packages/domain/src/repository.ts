@@ -8,6 +8,7 @@ import type {
   PlannedMealId,
   RecipeId,
   UserId,
+  DeviceId,
 } from './ids.js';
 import type {
   ChatMessage,
@@ -28,6 +29,7 @@ import type {
   User,
   VoiceTranscript,
   GroceryRequest,
+  NotificationLevel,
 } from './types.js';
 import type { ProductMatch } from './provider.js';
 
@@ -201,9 +203,23 @@ export interface Repository extends AuthorizationLookup {
 
   // ---- member state + devices ----
   getMemberState(userId: UserId, householdId: HouseholdId): Promise<HouseholdMemberState | null>;
+  /**
+   * Set the per-household notification override for a user (issue 12, AC#2).
+   * A null override restores the role default.
+   */
+  setNotificationOverride(
+    userId: UserId,
+    householdId: HouseholdId,
+    override: NotificationLevel | null,
+  ): Promise<HouseholdMemberState>;
   markRead(userId: UserId, householdId: HouseholdId, upTo: ChatMessageId): Promise<void>;
   registerDevice(device: Omit<DeviceRegistration, 'id'>): Promise<DeviceRegistration>;
   listDevices(userId: UserId): Promise<DeviceRegistration[]>;
+  /**
+   * Invalidate a device token (issue 12, AC#8). Retired tokens never receive
+   * pushes; the row is preserved for audit.
+   */
+  invalidateDevice(deviceId: DeviceId): Promise<void>;
 
   // ---- orders ----
   createOrder(

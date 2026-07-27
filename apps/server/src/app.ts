@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from 'node:crypto';
-import { and, asc, count, desc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gt, inArray, isNull } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import {
@@ -37,6 +37,8 @@ import {
   type PlannedMeal,
   type SuggestedCartItem,
   type SystemEventType,
+  type HouseholdRole,
+  type NotificationLevel,
   type GroceryProvider,
   type ProductMatch,
   type ProviderProduct,
@@ -59,10 +61,16 @@ import {
   classifyCheckoutResult,
   cancellationGuidance,
   auditResultFor,
+  dispatchEventPushes,
+  dispatchMessagePushes,
+  type PushDispatcher,
+  type PushNotification,
+  type ResolveRecipientsInput,
 } from '@cooklink/domain';
 import {
   actionSuggestions,
   chatMessages,
+  deviceRegistrations,
   groceryRequests,
   householdInvites,
   householdMemberState,
@@ -97,6 +105,17 @@ import type { Logger } from 'pino';
 
 type HouseholdRoleInvite = 'member' | 'cook';
 
+/**
+ * A no-op push dispatcher used when no real push adapter is configured
+ * (development, tests). Records nothing and always reports success so the
+ * dispatch pipeline runs end-to-end without a provider.
+ */
+class NoopPushDispatcher implements PushDispatcher {
+  async dispatch(_notification: PushNotification) {
+    return { ok: true as const };
+  }
+}
+
 export interface AppServices {
   media?: MediaStore;
   transcription?: TranscriptionService;
@@ -121,6 +140,12 @@ export interface AppServices {
    * visibly disabled until Swiggy staging and production access are approved.
    */
   orderingEnabled?: boolean;
+  /**
+   * Push notification dispatcher (issue 12). Defaults to a no-op recording
+   * dispatcher; production wires Expo/APNs/FCM. Failures from invalid tokens
+   * are reported back so the server can retire them (AC#8).
+   */
+  pushDispatcher?: PushDispatcher;
 }
 
 /**
@@ -198,6 +223,11 @@ export function createApp(db: Database, services?: AppServices) {
    */
   const orderingEnabled =
     services?.orderingEnabled ?? process.env.COOKLINK_ORDERING_ENABLED === 'true';
+  /**
+   * Push notification dispatcher (issue 12). Defaults to a no-op recording
+   * dispatcher in development; production injects an Expo/APNs/FCM adapter.
+   */
+  const pushDispatcher: PushDispatcher = services?.pushDispatcher ?? new NoopPushDispatcher();
 
   app.use(
     '*',
@@ -418,6 +448,25 @@ export function createApp(db: Database, services?: AppServices) {
       );
     }
     await recordMealChangedEvent(db, principal.householdId, principal.membershipId, persisted);
+    // Fire-and-forget push for same-day meal changes (issue 12, AC#3).
+    const today = todayISO();
+    void dispatchPushForEvent(
+      db,
+      pushDispatcher,
+      principal.householdId as string,
+      principal.membershipId as string,
+      {
+        type: 'meal.changed',
+        entityId: persisted.id,
+        payload: mealChangedPayload(persisted.date, persisted.mealType, persisted.name),
+      },
+      {
+        type: 'meal.changed',
+        sameDayMeal: persisted.date === today,
+      },
+      `${persisted.mealType[0]!.toUpperCase()}${persisted.mealType.slice(1)} on ${persisted.date} is now ${persisted.name}.`,
+      log,
+    );
     return c.json({ meal: serializePlannedMeal(persisted) });
   });
 
@@ -1441,6 +1490,27 @@ export function createApp(db: Database, services?: AppServices) {
       principal.membershipId,
       created!.id,
       intent,
+    );
+    // Fire-and-forget push dispatch (issue 12, AC#3/AC#5). The sender never
+    // receives their own message; muted recipients are excluded; previews
+    // respect per-device and money-redaction rules.
+    const senderLabel = names.get(created!.senderId);
+    const senderName = senderLabel?.displayName ?? 'Someone';
+    const previewText =
+      created!.kind === 'text'
+        ? (created!.body ?? '')
+        : created!.kind === 'photo'
+          ? (created!.caption ?? 'Photo')
+          : 'Voice message';
+    void dispatchPushForMessage(
+      db,
+      pushDispatcher,
+      principal.householdId as string,
+      principal.membershipId as string,
+      created!.id,
+      senderName,
+      previewText,
+      log,
     );
 
     return c.json(
@@ -3168,7 +3238,223 @@ export function createApp(db: Database, services?: AppServices) {
       .limit(1);
     return c.json({ item: serializeSuggestedCartItem(toDomainCartItem(updated!)) });
   });
-
+  // ---- Notifications & Devices (issue 12) -------------------------------
+  //
+  // Role-aware push notifications: each person configures a per-role default
+  // and may override a Household with All activity, Important only, or Muted
+  // (AC#2). Device tokens are registered for push delivery and retired when
+  // the provider reports them invalid (AC#8). Opening a push re-authorizes
+  // current membership via the existing /access route before showing protected
+  // content (AC#7); the push payload is NEVER trusted as authorization.
+  /**
+   * Set the per-role notification default for the current user (issue 12,
+   * AC#2). The default applies to every Household where the user holds that
+   * role unless overridden per-Household.
+   */
+  app.patch('/v1/me/notification-default', async (c) => {
+    const user = c.get('authUser');
+    const body: { role?: 'member' | 'cook'; level?: NotificationLevel } = await c.req
+      .json()
+      .catch(() => ({}));
+    if (body.role !== 'member' && body.role !== 'cook') {
+      return c.json({ error: 'invalid_role' }, 400);
+    }
+    if (body.level !== 'all' && body.level !== 'important' && body.level !== 'muted') {
+      return c.json({ error: 'invalid_level' }, 400);
+    }
+    // Update all active memberships where this user holds the given role.
+    await db
+      .update(memberships)
+      .set({ notificationDefault: body.level })
+      .where(
+        and(
+          eq(memberships.userId, user.id),
+          eq(memberships.role, body.role),
+          eq(memberships.status, 'active'),
+        ),
+      );
+    return c.json({ ok: true, role: body.role, default: body.level });
+  });
+  /**
+   * Set a per-Household notification override for the current user (issue 12,
+   * AC#2). The override wins over the role default. A null override restores
+   * the default.
+   */
+  app.patch('/v1/households/:householdId/notification-override', async (c) => {
+    const user = c.get('authUser');
+    const householdId = c.req.param('householdId');
+    const principal = await authorization.authorizeCapability(
+      id<'UserId'>(user.id),
+      id<'HouseholdId'>(householdId),
+      'configure_notifications',
+    );
+    const body: { level?: NotificationLevel | null } = await c.req.json().catch(() => ({}));
+    const level = body.level ?? null;
+    if (level !== null && level !== 'all' && level !== 'important' && level !== 'muted') {
+      return c.json({ error: 'invalid_level' }, 400);
+    }
+    await db
+      .insert(householdMemberState)
+      .values({
+        userId: principal.userId,
+        householdId: principal.householdId,
+        notificationOverride: level,
+      })
+      .onDuplicateKeyUpdate({ set: { notificationOverride: level } });
+    return c.json({ ok: true, override: level });
+  });
+  /**
+   * Register a device for push notifications (issue 12). The push token is
+   * unique per device; re-registering updates the platform and preview
+   * settings. The `hidePreviews` flag produces generic notification text only
+   * (AC#6 — previews are redacted per device setting; money is always
+   * redacted regardless).
+   */
+  app.post('/v1/me/devices', async (c) => {
+    const user = c.get('authUser');
+    const body: {
+      pushToken?: string;
+      platform?: 'ios' | 'android';
+      hidePreviews?: boolean;
+    } = await c.req.json().catch(() => ({}));
+    if (!body.pushToken || typeof body.pushToken !== 'string') {
+      return c.json({ error: 'push_token_required' }, 400);
+    }
+    if (body.platform !== 'ios' && body.platform !== 'android') {
+      return c.json({ error: 'invalid_platform' }, 400);
+    }
+    await db
+      .insert(deviceRegistrations)
+      .values({
+        id: randomUUID(),
+        userId: user.id,
+        pushToken: body.pushToken,
+        platform: body.platform,
+        hidePreviews: body.hidePreviews ?? false,
+        invalidatedAt: null,
+      })
+      .onDuplicateKeyUpdate({
+        set: {
+          userId: user.id,
+          platform: body.platform,
+          hidePreviews: body.hidePreviews ?? false,
+          invalidatedAt: null,
+        },
+      });
+    const [row] = await db
+      .select()
+      .from(deviceRegistrations)
+      .where(eq(deviceRegistrations.pushToken, body.pushToken))
+      .limit(1);
+    return c.json(
+      {
+        device: {
+          id: row!.id,
+          pushToken: row!.pushToken,
+          platform: row!.platform,
+          hidePreviews: row!.hidePreviews,
+          invalidatedAt: row!.invalidatedAt?.toISOString() ?? null,
+        },
+      },
+      201,
+    );
+  });
+  /**
+   * List the current user's active devices (issue 12). Invalidated devices
+   * are excluded from push delivery and from this list.
+   */
+  app.get('/v1/me/devices', async (c) => {
+    const user = c.get('authUser');
+    const rows = await db
+      .select()
+      .from(deviceRegistrations)
+      .where(
+        and(
+          eq(deviceRegistrations.userId, user.id),
+          isNull(deviceRegistrations.invalidatedAt),
+        ),
+      );
+    return c.json({
+      devices: rows.map((row) => ({
+        id: row.id,
+        pushToken: row.pushToken,
+        platform: row.platform,
+        hidePreviews: row.hidePreviews,
+      })),
+    });
+  });
+  /**
+   * Remove a device registration (issue 12). The token is invalidated so it
+   * no longer receives pushes; the row is preserved for audit.
+   */
+  app.delete('/v1/me/devices/:deviceId', async (c) => {
+    const user = c.get('authUser');
+    const deviceId = c.req.param('deviceId');
+    await db
+      .update(deviceRegistrations)
+      .set({ invalidatedAt: new Date() })
+      .where(
+        and(eq(deviceRegistrations.id, deviceId), eq(deviceRegistrations.userId, user.id)),
+      );
+    return c.json({ ok: true });
+  });
+  /**
+   * Unread message count for the current user in a household (issue 12,
+   * AC#8 — muted notifications preserve correct in-app unread). The count is
+   * independent of the push notification level so a muted person still sees
+   * the correct unread badge in-app.
+   */
+  app.get('/v1/households/:householdId/unread', async (c) => {
+    const user = c.get('authUser');
+    const householdId = c.req.param('householdId');
+    const principal = await authorization.authorize(
+      id<'UserId'>(user.id),
+      id<'HouseholdId'>(householdId),
+    );
+    const [stateRow] = await db
+      .select()
+      .from(householdMemberState)
+      .where(
+        and(
+          eq(householdMemberState.userId, principal.userId),
+          eq(householdMemberState.householdId, principal.householdId),
+        ),
+      )
+      .limit(1);
+    const lastReadId = stateRow?.lastReadMessageId;
+    let unreadCount: number;
+    if (!lastReadId) {
+      const [agg] = await db
+        .select({ value: count() })
+        .from(chatMessages)
+        .where(
+          and(
+            eq(chatMessages.householdId, principal.householdId),
+            isNull(chatMessages.deletedAt),
+          ),
+        );
+      unreadCount = Number(agg?.value ?? 0);
+    } else {
+      const [lastReadRow] = await db
+        .select({ serverCreatedAt: chatMessages.serverCreatedAt })
+        .from(chatMessages)
+        .where(eq(chatMessages.id, lastReadId))
+        .limit(1);
+      const cutoff = lastReadRow?.serverCreatedAt ?? new Date(0);
+      const [agg] = await db
+        .select({ value: count() })
+        .from(chatMessages)
+        .where(
+          and(
+            eq(chatMessages.householdId, principal.householdId),
+            isNull(chatMessages.deletedAt),
+            gt(chatMessages.serverCreatedAt, cutoff),
+          ),
+        );
+      unreadCount = Number(agg?.value ?? 0);
+    }
+    return c.json({ unread: unreadCount });
+  });
   app.onError((err, c) => {
     if (err instanceof AuthorizationDeniedError) {
       // Structured authorization-denial log (issue 07, AC#5 / AC#19). Denials
@@ -3644,6 +3930,274 @@ async function recordMealChangedEvent(
     entityId: meal.id,
     payload: mealChangedPayload(meal.date, meal.mealType, meal.name),
   });
+}
+
+/**
+ * Gather the push-dispatch input (members, member states, devices) for a
+ * household (issue 12). Runs outside any write transaction so push dispatch
+ * never blocks or rolls back the durable write.
+ */
+async function gatherPushInput(
+  db: Database,
+  householdId: string,
+): Promise<{
+  members: { id: string; userId: string; role: string; status: string; notificationDefault: string }[];
+  memberStates: { userId: string; householdId: string; notificationOverride: string | null }[];
+  devices: { pushToken: string; userId: string; hidePreviews: boolean; invalidatedAt: Date | null }[];
+}> {
+  const memberRows = await db
+    .select()
+    .from(memberships)
+    .where(eq(memberships.householdId, householdId));
+  const userIds = [...new Set(memberRows.map((m) => m.userId))];
+  const stateRows =
+    userIds.length > 0
+      ? await db
+          .select()
+          .from(householdMemberState)
+          .where(
+            and(
+              eq(householdMemberState.householdId, householdId),
+              inArray(householdMemberState.userId, userIds),
+            ),
+          )
+      : [];
+  const deviceRows =
+    userIds.length > 0
+      ? await db
+          .select()
+          .from(deviceRegistrations)
+          .where(inArray(deviceRegistrations.userId, userIds))
+      : [];
+  return {
+    members: memberRows.map((m) => ({
+      id: m.id,
+      userId: m.userId,
+      role: m.role,
+      status: m.status,
+      notificationDefault: m.notificationDefault,
+    })),
+    memberStates: stateRows.map((s) => ({
+      userId: s.userId,
+      householdId: s.householdId,
+      notificationOverride: s.notificationOverride,
+    })),
+    devices: deviceRows.map((d) => ({
+      pushToken: d.pushToken,
+      userId: d.userId,
+      hidePreviews: d.hidePreviews,
+      invalidatedAt: d.invalidatedAt,
+    })),
+  };
+}
+
+/**
+ * Fire-and-forget push dispatch for a system event (issue 12). Gathers
+ * recipient state after the durable write commits, resolves the role-aware
+ * recipients, builds redacted previews, and dispatches. Invalid tokens are
+ * retired (AC#8). Errors are logged and never propagate to the caller.
+ */
+async function dispatchPushForEvent(
+  db: Database,
+  pushDispatcher: PushDispatcher,
+  householdId: string,
+  actorMembershipId: string | null,
+  event: { type: string; entityId: string; payload: Record<string, unknown> },
+  eventInput: { type: SystemEventType; sameDayMeal: boolean },
+  previewText: string,
+  log: Logger,
+): Promise<void> {
+  try {
+    const [household] = await db
+      .select()
+      .from(households)
+      .where(eq(households.id, householdId))
+      .limit(1);
+    if (!household) return;
+    const input = await gatherPushInput(db, householdId);
+    const resolveInput: ResolveRecipientsInput = {
+      householdId: id<'HouseholdId'>(householdId),
+      actorMembershipId: actorMembershipId ? id<'MembershipId'>(actorMembershipId) : null,
+      members: input.members.map((m) => ({
+        id: id<'MembershipId'>(m.id),
+        userId: id<'UserId'>(m.userId),
+        householdId: id<'HouseholdId'>(householdId),
+        role: m.role as HouseholdRole,
+        status: m.status as 'active' | 'removed',
+        notificationDefault: m.notificationDefault as NotificationLevel,
+        joinedAt: '',
+        removedAt: null,
+      })),
+      memberStates: input.memberStates.map((s) => ({
+        userId: id<'UserId'>(s.userId),
+        householdId: id<'HouseholdId'>(householdId),
+        lastReadMessageId: null,
+        notificationOverride: s.notificationOverride as NotificationLevel | null,
+      })),
+      devices: input.devices
+        .filter((d) => !d.invalidatedAt)
+        .map((d) => ({
+          id: id<'DeviceId'>(''),
+          userId: id<'UserId'>(d.userId),
+          pushToken: d.pushToken,
+          platform: 'ios' as const,
+          hidePreviews: d.hidePreviews,
+          invalidatedAt: null,
+        })),
+    };
+    const domainEvent = {
+      id: id<'SystemEventId'>(''),
+      householdId: id<'HouseholdId'>(householdId),
+      type: eventInput.type,
+      actorId: actorMembershipId ? id<'MembershipId'>(actorMembershipId) : null,
+      entityType: '',
+      entityId: event.entityId,
+      payload: event.payload,
+      createdAt: new Date().toISOString(),
+    };
+    const result = await dispatchEventPushes(
+      pushDispatcher,
+      {
+        id: id<'HouseholdId'>(householdId),
+        name: household.name,
+        photoUrl: household.photoUrl,
+        servingCount: household.servingCount,
+        mealStyle: household.mealStyle,
+        dietStyle: household.dietStyle,
+        healthEmphasis: household.healthEmphasis,
+        specialMealEnabled: household.specialMealEnabled,
+        defaultLanguage: household.defaultLanguage,
+        createdAt: household.createdAt.toISOString(),
+        closedAt: household.closedAt ? household.closedAt.toISOString() : null,
+      },
+      resolveInput,
+      eventInput,
+      domainEvent,
+      previewText,
+    );
+    await retireInvalidTokens(db, result.invalidTokens);
+    log.debug({
+      msg: 'push.event_dispatched',
+      householdId,
+      type: eventInput.type,
+      delivered: result.delivered,
+      invalidTokens: result.invalidTokens.length,
+    });
+  } catch (err) {
+    log.error({ msg: 'push.event_dispatch_failed', householdId, err });
+  }
+}
+
+/**
+ * Fire-and-forget push dispatch for a chat message (issue 12). Same lifecycle
+ * as event dispatch: after the durable write, gather state, resolve, build,
+ * dispatch, retire invalid tokens.
+ */
+async function dispatchPushForMessage(
+  db: Database,
+  pushDispatcher: PushDispatcher,
+  householdId: string,
+  senderMembershipId: string,
+  messageId: string,
+  senderName: string,
+  previewText: string,
+  log: Logger,
+): Promise<void> {
+  try {
+    const [household] = await db
+      .select()
+      .from(households)
+      .where(eq(households.id, householdId))
+      .limit(1);
+    if (!household) return;
+    const input = await gatherPushInput(db, householdId);
+    const resolveInput: ResolveRecipientsInput = {
+      householdId: id<'HouseholdId'>(householdId),
+      actorMembershipId: id<'MembershipId'>(senderMembershipId),
+      members: input.members.map((m) => ({
+        id: id<'MembershipId'>(m.id),
+        userId: id<'UserId'>(m.userId),
+        householdId: id<'HouseholdId'>(householdId),
+        role: m.role as HouseholdRole,
+        status: m.status as 'active' | 'removed',
+        notificationDefault: m.notificationDefault as NotificationLevel,
+        joinedAt: '',
+        removedAt: null,
+      })),
+      memberStates: input.memberStates.map((s) => ({
+        userId: id<'UserId'>(s.userId),
+        householdId: id<'HouseholdId'>(householdId),
+        lastReadMessageId: null,
+        notificationOverride: s.notificationOverride as NotificationLevel | null,
+      })),
+      devices: input.devices
+        .filter((d) => !d.invalidatedAt)
+        .map((d) => ({
+          id: id<'DeviceId'>(''),
+          userId: id<'UserId'>(d.userId),
+          pushToken: d.pushToken,
+          platform: 'ios' as const,
+          hidePreviews: d.hidePreviews,
+          invalidatedAt: null,
+        })),
+    };
+    const message = {
+      id: id<'ChatMessageId'>(messageId),
+      householdId: id<'HouseholdId'>(householdId),
+      senderId: id<'MembershipId'>(senderMembershipId),
+      kind: 'text' as const,
+      body: previewText,
+      caption: null,
+      mediaRef: null,
+      clientCreatedAt: new Date().toISOString(),
+      serverCreatedAt: new Date().toISOString(),
+      editedAt: null,
+      deletedAt: null,
+    };
+    const result = await dispatchMessagePushes(
+      pushDispatcher,
+      {
+        id: id<'HouseholdId'>(householdId),
+        name: household.name,
+        photoUrl: household.photoUrl,
+        servingCount: household.servingCount,
+        mealStyle: household.mealStyle,
+        dietStyle: household.dietStyle,
+        healthEmphasis: household.healthEmphasis,
+        specialMealEnabled: household.specialMealEnabled,
+        defaultLanguage: household.defaultLanguage,
+        createdAt: household.createdAt.toISOString(),
+        closedAt: household.closedAt ? household.closedAt.toISOString() : null,
+      },
+      resolveInput,
+      message,
+      senderName,
+      previewText,
+    );
+    await retireInvalidTokens(db, result.invalidTokens);
+    log.debug({
+      msg: 'push.message_dispatched',
+      householdId,
+      delivered: result.delivered,
+      invalidTokens: result.invalidTokens.length,
+    });
+  } catch (err) {
+    log.error({ msg: 'push.message_dispatch_failed', householdId, err });
+  }
+}
+
+/**
+ * Retire invalid device tokens (issue 12, AC#8). Called after a dispatch
+ * cycle reports tokens that the push provider rejected as invalid.
+ */
+async function retireInvalidTokens(db: Database, tokens: string[]): Promise<void> {
+  if (tokens.length === 0) return;
+  for (const token of tokens) {
+    await db
+      .update(deviceRegistrations)
+      .set({ invalidatedAt: new Date() })
+      .where(eq(deviceRegistrations.pushToken, token));
+  }
 }
 
 /**
