@@ -1,0 +1,136 @@
+apps/mobile/src/tests/accessibility.test.ts
+  s_c44edb9edc3aba::t_e544ecbf8679c5 1-175,177-255,257-267
+  s_c9c4aa1f704b88::t_2621e85fed65d0 268-318
+  s_3aacb302625ade::t_7fc740e05ed2d1 319-362
+  s_c44edb9edc3aba::t_141147572a89d2 256
+  s_c44edb9edc3aba::t_f12cd8681f793b 176
+apps/mobile/app/invite.tsx
+  s_3aacb302625ade::t_a93e705fcc42b5 16-19,30-37
+  s_c9c4aa1f704b88::t_e3c2ebc589df99 1-15,20-29,38-46
+apps/server/src/app.ts
+  s_c9c4aa1f704b88::t_49e9e941d5ec98 1053-1077
+  s_3aacb302625ade::t_5586b67abf9443 3397,3418,3451,3961-3967,3969-3974
+apps/mobile/app/index.tsx
+  s_3aacb302625ade::t_dd34390962c5cf 1,11,26-30,34-44,47-49
+  s_c9c4aa1f704b88::t_eeb730a217a277 159-160,163-165,169-178
+  s_c9c4aa1f704b88::t_5124fddd832edb 252-258
+  s_c9c4aa1f704b88::t_fe4b1b3aff0af5 344-345,354-403
+  s_c9c4aa1f704b88::t_b09c09eb4bfde8 453-459
+apps/mobile/src/lib/households.ts
+  s_c9c4aa1f704b88::t_2f884fede7a454 2,5
+  s_3aacb302625ade::t_f700ece7825536 77-85,91-94,136-140,142,151-154,156-159,162-163
+  s_3aacb302625ade::t_f1745a34460eb9 104-106,127-128,143-149
+  s_c9c4aa1f704b88::t_944188a0de301e 72-76,86-89,103,107-126,132-135,141,150,160,165
+packages/domain/src/tests/v1-journey.test.ts
+  s_c44edb9edc3aba::t_202a5792879d1f 97
+  s_c44edb9edc3aba::t_ca3180dae33e63 125-128
+  s_c44edb9edc3aba::t_1c6ad21e15f834 1-2,4-6,8-13,15-96,98-104,110-124,129-149,151,156-157,160-168,170-171,174-241,243-244,246-292
+  s_c44edb9edc3aba::t_b78c2334c12ef0 105-106,108-109
+  s_c44edb9edc3aba::t_cb023cea093a30 150
+  s_c44edb9edc3aba::t_52d2d32eaf2d6b 152-155
+  s_c44edb9edc3aba::t_3bbcca0bda8e91 169,172-173
+  s_c44edb9edc3aba::t_8f3f3eb33e993a 7
+  s_c44edb9edc3aba::t_c55e19999fcd73 14,158-159,293-298
+  s_c44edb9edc3aba::t_ef14d24747a236 242,245
+  s_c44edb9edc3aba::t_6d54bbbc4cbb77 3
+  s_c44edb9edc3aba::t_60e6dedcb0d10f 107
+packages/domain/src/tests/localization.test.ts
+  s_c44edb9edc3aba::t_19de9c11d1e7fa 196-197,201-202,206-207,214-215,217-218,220-221
+  s_c44edb9edc3aba::t_de7fc53460fa05 34-36
+  s_c44edb9edc3aba::t_b96e0b74d294c2 224-239,244-256
+  s_c44edb9edc3aba::t_935455bf5c8612 3-5
+  s_c44edb9edc3aba::t_ae663c580ff6a3 240-243
+  s_c44edb9edc3aba::t_e6355b0befe134 1-2,6-15,17-30,32-33,37-195,198-200,203-205,208-213,216,219,222-223,257
+  s_c44edb9edc3aba::t_2c94e383da3b56 31
+  s_c44edb9edc3aba::t_f1e8bc8e161659 16
+  s_c44edb9edc3aba::t_294380e8b3d094 258-260
+  s_3aacb302625ade::t_c37a0d02a5023d 261-268
+apps/mobile/src/screens/MemberShell.tsx
+  s_c9c4aa1f704b88::t_f6a5281a3d2480 166-168,175-176
+  s_3aacb302625ade::t_0b7a76a5ba4981 188
+packages/domain/src/tests/recovery-scenarios.test.ts
+  s_c44edb9edc3aba::t_ea593bf612c728 3-5
+  s_c44edb9edc3aba::t_e35335cd0e0576 6
+  s_c44edb9edc3aba::t_312eac694b0de4 426-442
+  s_c44edb9edc3aba::t_2d0add22ac78f7 118,121
+  s_c44edb9edc3aba::t_7a785d2e32e6f4 1-2,7-40,47-117,119-120,122-240,243-277,280-425
+  s_c44edb9edc3aba::t_8702315d70de61 41-46
+  s_c44edb9edc3aba::t_7d76156296af53 278-279
+  s_c44edb9edc3aba::t_c1f3587cfe3f20 241-242
+apps/mobile/src/lib/api.ts
+  s_c9c4aa1f704b88::t_83fb5227bcf418 6-25,41
+apps/server/src/tests/invite-lifecycle.routes.test.ts
+  s_c9c4aa1f704b88::t_667b582f14d178 229-352
+  s_c9c4aa1f704b88::t_10bd5fac9f3177 353-354
+apps/server/src/tests/secrets-history.test.ts
+  s_3aacb302625ade::t_ae3dd3fa7f2cb0 46-51,63-65,67-69
+  s_c44edb9edc3aba::t_8cc3437b6ee113 1-2,5-45,52-62,70-105
+  s_c44edb9edc3aba::t_5ac89cdee14a68 3-4
+  s_3aacb302625ade::t_0d7740ef4f4974 66
+apps/mobile/package.json
+  s_c44edb9edc3aba::t_6ab174017f1f2b 10-11
+  s_c44edb9edc3aba::t_04101ac87fb578 27,29
+apps/server/src/secrets-history.ts
+  s_c44edb9edc3aba::t_ba0038175211b0 1-23,27,29-40,50,88,90-119,122-141,143-145
+  s_c44edb9edc3aba::t_b54453526bcf42 77
+  s_c44edb9edc3aba::t_3bf1359d4df25a 24-26,28,41-49,51-76,78-87,89,120-121,142
+apps/mobile/src/screens/AcceptInvite.tsx
+  s_c9c4aa1f704b88::t_b5e9237cc1d082 1-124
+apps/mobile/tsconfig.json
+  s_c44edb9edc3aba::t_5c64fe3a375707 5-6
+RELEASE_GATES.md
+  s_c44edb9edc3aba::t_c935f62cffff73 1-16,18-235
+  s_c44edb9edc3aba::t_8b2a2b00508876 17
+apps/mobile/src/lib/chat.ts
+  s_3aacb302625ade::t_3ab92f6770ca1f 180
+apps/mobile/src/lib/grocery.ts
+  s_3aacb302625ade::t_aa0024ae358efc 17
+apps/mobile/src/screens/MealPlan.tsx
+  s_3aacb302625ade::t_a40ac9db232172 20-49,71,120,141,232,442,460,469,495,607,610,657-664
+apps/server/src/tests/notifications.routes.test.ts
+  s_3aacb302625ade::t_912efd2cb640af 45-49,56-60,66-70
+packages/db/migrations/meta/0001_snapshot.json
+  s_3aacb302625ade::t_8d8b78b775c263 72,77,85,176,184,262,270,333,341,382,390,454,462,548,556,634,639,647,688,790,849,921,926,931,939,1023,1031,1133,1138,1146,1240,1325,1333,1384,1454,1462,1511,1519,1570,1587
+packages/domain/src/grocery-request.ts
+  s_3aacb302625ade::t_3d32a86c7e6a01 94-102,268-271
+packages/domain/src/push-dispatch.ts
+  s_3aacb302625ade::t_7a02068379efdf 120,231
+packages/domain/src/tests/grocery-request.test.ts
+  s_3aacb302625ade::t_84d9c16452a4a3 23-25,151-159
+packages/domain/src/tests/push-dispatch.test.ts
+  s_3aacb302625ade::t_9d47c72f407e39 332-338
+pnpm-lock.yaml
+  s_c44edb9edc3aba::t_3f8e2dbd4cf115 63-65,69-71,1492
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "5012a7a12802cbe8030c1dd5d04304178ad3b22b",
+  "prompts": {},
+  "sessions": {
+    "s_3aacb302625ade": {
+      "agent_id": {
+        "tool": "droid",
+        "id": "dd93c46b-2258-471f-a968-3462db112e9b",
+        "model": "glm-5.2"
+      },
+      "human_author": "Ashish Huddar <ashish.hudar@gmail.com>"
+    },
+    "s_c44edb9edc3aba": {
+      "agent_id": {
+        "tool": "droid",
+        "id": "a2cb6d3b-5450-4176-899a-702cc7cbc438",
+        "model": "auto"
+      },
+      "human_author": "Ashish Huddar <ashish.hudar@gmail.com>"
+    },
+    "s_c9c4aa1f704b88": {
+      "agent_id": {
+        "tool": "droid",
+        "id": "cfd63faa-c2f1-46d8-ab04-c0dba0b20398",
+        "model": "glm-5.2"
+      },
+      "human_author": "Ashish Huddar <ashish.hudar@gmail.com>"
+    }
+  }
+}
