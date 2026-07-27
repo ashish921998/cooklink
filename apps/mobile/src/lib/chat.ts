@@ -109,9 +109,27 @@ interface TimelineResponse {
   items: TimelineItem[];
 }
 
+/** The detected intent shape returned by the server for a message/suggestion. */
+export interface ChatIntentResponse {
+  kind: string;
+  item?: string;
+  quantity?: string | null;
+}
+
+/** A private action suggestion detected from the author's message (ticket 08). */
+export interface ActionSuggestionResponse {
+  id: string;
+  intent: ChatIntentResponse;
+  status: 'pending' | 'confirmed' | 'dismissed' | 'expired' | 'failed';
+}
+
 interface SendResponse {
   membershipId: string;
   item: ChatMessageItem;
+  /** The detected intent for the author's message (unknown → no suggestion). */
+  intent: ChatIntentResponse;
+  /** A private suggestion persisted for the author, or null when no actionable intent. */
+  suggestion: ActionSuggestionResponse | null;
 }
 
 interface MediaUploadResponse {
@@ -122,12 +140,12 @@ interface MediaUploadResponse {
 
 interface TranscriptCorrectResponse {
   transcript: ChatTranscript;
-  intent: { kind: string; item?: string; quantity?: string | null };
+  intent: ChatIntentResponse;
 }
 
 interface CaptionEditResponse {
   item: ChatMessageItem;
-  intent: { kind: string; item?: string; quantity?: string | null };
+  intent: ChatIntentResponse;
 }
 
 /** The maximum voice note duration (ticket 06, AC#2 — two minutes). */
@@ -157,6 +175,11 @@ export function useHouseholdChat(householdId: string, ownMembershipId: string | 
   const [outbox, setOutbox] = useState<OutboxItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // The latest private action suggestion for the author (ticket 08, AC#3).
+  // Private to the author; never rendered for other participants.
+  const [pendingSuggestion, setPendingSuggestion] = useState<ActionSuggestionResponse | null>(
+    null,
+  );
   const newestIdRef = useRef<string | null>(null);
   // Stable refs for the media upload fetch (which sends raw bytes, not JSON).
   const useAuthRef = useRef({ getToken });
@@ -204,14 +227,33 @@ export function useHouseholdChat(householdId: string, ownMembershipId: string | 
     }
   }, [api, householdId, sortByTime]);
 
+  /**
+   * Rehydrate the author's pending private suggestions so they survive app
+   * restarts (ticket 08, AC#3; issue 06). Only the author's own pending
+   * suggestions are returned by the server; other participants never see them.
+   * We surface the most recent one for the composer's private suggestion card.
+   */
+  const loadPendingSuggestions = useCallback(async () => {
+    try {
+      const data = await api<{ suggestions: ActionSuggestionResponse[] }>(
+        `/v1/households/${householdId}/chat/suggestions`,
+      );
+      setPendingSuggestion(data.suggestions[0] ?? null);
+    } catch {
+      // Best-effort rehydration; never block Chat on it.
+    }
+  }, [api, householdId]);
+
   // Reset state on Household change — no leakage across Households.
   useEffect(() => {
     setItems([]);
     setOutbox([]);
     newestIdRef.current = null;
     setLoading(true);
+    setPendingSuggestion(null);
     void loadInitial();
-  }, [householdId, loadInitial]);
+    void loadPendingSuggestions();
+  }, [householdId, loadInitial, loadPendingSuggestions]);
 
   // Forward-cursor polling for newer items. Unknown cursors are a safe no-op
   // on the server, so a brand-new Household (no newest id yet) simply loads
@@ -259,6 +301,7 @@ export function useHouseholdChat(householdId: string, ownMembershipId: string | 
         });
         // The accepted message enters the timeline; the outbox row retires.
         absorb([result.item]);
+        setPendingSuggestion(result.suggestion ?? null);
         setOutbox((prev) =>
           prev.map((row) =>
             row.localId === localId ? { ...row, state: 'sent', serverId: result.item.id } : row,
@@ -347,6 +390,7 @@ export function useHouseholdChat(householdId: string, ownMembershipId: string | 
           body: JSON.stringify({ kind: 'photo', mediaRef, caption, clientCreatedAt }),
         });
         absorb([result.item]);
+        setPendingSuggestion(result.suggestion ?? null);
         setOutbox((prev) =>
           prev.map((row) =>
             row.localId === localId ? { ...row, state: 'sent', serverId: result.item.id } : row,
@@ -398,6 +442,9 @@ export function useHouseholdChat(householdId: string, ownMembershipId: string | 
           body: JSON.stringify({ kind: 'voice', mediaRef, durationMs, clientCreatedAt }),
         });
         absorb([result.item]);
+        // A voice note with a pending transcript produces no suggestion yet;
+        // the transcript-correction flow re-runs intent detection when ready.
+        setPendingSuggestion(result.suggestion ?? null);
         setOutbox((prev) =>
           prev.map((row) =>
             row.localId === localId ? { ...row, state: 'sent', serverId: result.item.id } : row,
@@ -533,10 +580,45 @@ export function useHouseholdChat(householdId: string, ownMembershipId: string | 
     [api, householdId],
   );
 
+  /**
+   * Confirm a private action suggestion (ticket 08, AC#4). The server
+   * re-authorizes and performs the role-appropriate structured mutation. A
+   * `missing_item` response carries a plain follow-up question (AC#2); a
+   * `similar_exists` response carries the similar request for an Update
+   * quantity / Keep separate choice (AC#5). Never places an order (AC#8).
+   */
   const refresh = useCallback(async () => {
     await poll();
     await loadInitial();
   }, [loadInitial, poll]);
+
+  const confirmSuggestion = useCallback(
+    async (
+      suggestionId: string,
+      options?: { keepSeparate?: boolean; updateQuantity?: boolean; quantity?: string | null },
+    ): Promise<unknown> => {
+      const res = await api<unknown>(
+        `/v1/households/${householdId}/chat/suggestions/${suggestionId}/confirm`,
+        { method: 'POST', body: JSON.stringify(options ?? {}) },
+      );
+      setPendingSuggestion(null);
+      await refresh();
+      return res;
+    },
+    [api, householdId, refresh],
+  );
+
+  /** Dismiss a private action suggestion (ticket 08, AC#3). */
+  const dismissSuggestion = useCallback(
+    async (suggestionId: string): Promise<void> => {
+      await api<{ ok: boolean }>(
+        `/v1/households/${householdId}/chat/suggestions/${suggestionId}/dismiss`,
+        { method: 'POST', body: JSON.stringify({}) },
+      );
+      setPendingSuggestion(null);
+    },
+    [api, householdId],
+  );
 
   return {
     items,
@@ -556,5 +638,8 @@ export function useHouseholdChat(householdId: string, ownMembershipId: string | 
     remove,
     markRead,
     refresh,
+    pendingSuggestion,
+    confirmSuggestion,
+    dismissSuggestion,
   };
 }
