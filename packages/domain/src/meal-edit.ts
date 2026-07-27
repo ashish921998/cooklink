@@ -1,6 +1,5 @@
 import type { MembershipId, PlannedMealId, RecipeId } from './ids.js';
 import type { DietStyle, ISODate, MealStyle, PlannedMeal, Recipe } from './types.js';
-import { mostRestrictive } from './types.js';
 import { generateStarterPlan, type RegenerateScope } from './meal-plan.js';
 
 /**
@@ -216,7 +215,6 @@ export interface RankedCandidate {
   recipe: Recipe;
   /** True when the recipe is outside the Household's active diet (issue 04). */
   dietMismatch: boolean;
-  mealTypeMatch: boolean;
 }
 
 /**
@@ -239,7 +237,6 @@ export function rankSearchCandidates(
 ): RankedCandidate[] {
   const q = query.trim().toLowerCase();
   if (!q) return [];
-  const safeStyle = mostRestrictive([householdDietStyle]);
   const matched = candidates.filter((recipe) => {
     const en = recipe.name.toLowerCase();
     const hi = recipe.nameHi?.toLowerCase() ?? '';
@@ -248,8 +245,7 @@ export function rankSearchCandidates(
   const ranked = matched
     .map((recipe) => ({
       recipe,
-      dietMismatch: isMorePermissive(recipe.dietStyle, safeStyle),
-      mealTypeMatch: true,
+      dietMismatch: isMorePermissive(recipe.dietStyle, householdDietStyle),
     }))
     .sort((a, b) => {
       // in-diet first, then stable by name so results are deterministic.
@@ -259,12 +255,13 @@ export function rankSearchCandidates(
   return ranked;
 }
 
+const DIET_ORDER: readonly DietStyle[] = ['vegetarian', 'eggetarian', 'nonvegetarian'];
+
 /**
  * True when `style` permits something `limit` forbids, i.e. adding it would
  * violate the Household's most-restrictive active diet. Vegetarian is the most
  * restrictive; non-vegetarian is the most permissive.
  */
 function isMorePermissive(style: DietStyle, limit: DietStyle): boolean {
-  const order: DietStyle[] = ['vegetarian', 'eggetarian', 'nonvegetarian'];
-  return order.indexOf(style) > order.indexOf(limit);
+  return DIET_ORDER.indexOf(style) > DIET_ORDER.indexOf(limit);
 }

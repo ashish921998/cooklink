@@ -267,11 +267,15 @@ export class InMemoryRepository implements Repository {
   async getRecipe(recipeId: RecipeId): Promise<Recipe | null> {
     return this.recipes.get(recipeId as string) ?? null;
   }
-  async searchRecipesForDiet(query: string, _diet: Household['dietStyle']): Promise<Recipe[]> {
+  async searchRecipesForDiet(query: string, diet: Household['dietStyle']): Promise<Recipe[]> {
     const q = query.toLowerCase();
-    return [...this.recipes.values()].filter(
-      (r) => r.name.toLowerCase().includes(q) || (r.nameHi?.includes(q) ?? false),
-    );
+    return [...this.recipes.values()].filter((r) => {
+      const matchesQuery =
+        r.name.toLowerCase().includes(q) || (r.nameHi?.includes(q) ?? false);
+      // Match the Drizzle repo: in-diet recipes or vegetarian (most restrictive).
+      const matchesDiet = r.dietStyle === diet || r.dietStyle === 'vegetarian';
+      return matchesQuery && matchesDiet;
+    });
   }
 
   async getGroceryRequest(id: GroceryRequestId): Promise<GroceryRequest | null> {
