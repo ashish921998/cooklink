@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from 'node:crypto';
-import { and, asc, count, eq, isNull } from 'drizzle-orm';
+import { and, asc, count, desc, eq, isNull } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
@@ -10,11 +10,19 @@ import {
   id,
   todayISO,
 } from '@cooklink/domain';
-import { householdInvites, households, memberships, plannedMeals } from '@cooklink/db';
+import { householdInvites, households, memberships, plannedMeals, systemEvents } from '@cooklink/db';
 import type { Database } from '@cooklink/db';
 import { authMiddleware, type AuthEnv } from './auth.js';
 import { DrizzleAuthorizationLookup } from './household-auth.js';
 import { hashPhone, validateInviteAcceptance } from './invite-policy.js';
+import {
+  INVITE_TTL_MS,
+  acceptStatusFor,
+  isInviteResendable,
+  isInviteRevocable,
+  type InviteRecord,
+} from './invite-lifecycle.js';
+import { validateMembershipRemoval } from './membership-lifecycle.js';
 
 type HouseholdRoleInvite = 'member' | 'cook';
 
@@ -223,9 +231,10 @@ export function createApp(db: Database) {
       return c.json({ error: 'role_invalid' }, 400);
 
     const token = randomBytes(18).toString('base64url');
-    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    const expiresAt = new Date(Date.now() + INVITE_TTL_MS);
+    const inviteId = randomUUID();
     await db.insert(householdInvites).values({
-      id: randomUUID(),
+      id: inviteId,
       householdId,
       role: body.role,
       phoneHash: hashPhone(phone),
@@ -233,7 +242,111 @@ export function createApp(db: Database) {
       status: 'pending',
       expiresAt,
     });
-    return c.json({ token, role: body.role, expiresAt: expiresAt.toISOString() }, 201);
+    return c.json({ id: inviteId, token, role: body.role, expiresAt: expiresAt.toISOString() }, 201);
+  });
+
+  /**
+   * The Owner's pending-invite management surface (issue 03). Returns only the
+   * pending invites for this Household, newest first, with the masked phone so
+   * the raw number never crosses the wire.
+   */
+  app.get('/v1/households/:householdId/invites', async (c) => {
+    const user = c.get('authUser');
+    const householdId = c.req.param('householdId');
+    await authorization.authorizeCapability(
+      id<'UserId'>(user.id),
+      id<'HouseholdId'>(householdId),
+      'manage_membership',
+    );
+    const rows = await db
+      .select()
+      .from(householdInvites)
+      .where(
+        and(
+          eq(householdInvites.householdId, householdId),
+          eq(householdInvites.status, 'pending'),
+        ),
+      )
+      .orderBy(desc(householdInvites.createdAt));
+    return c.json({
+      invites: rows.map((row) => ({
+        id: row.id,
+        role: row.role,
+        phoneMasked: maskPhoneHash(row.phoneHash),
+        expiresAt: row.expiresAt.toISOString(),
+        })),
+    });
+  });
+
+  /**
+   * Revoke a pending, single-use Household Invite (issue 03). Revoked tokens
+   * can no longer be accepted, even before the seven-day expiry.
+   */
+  app.delete('/v1/invites/:inviteId', async (c) => {
+    const user = c.get('authUser');
+    const inviteId = c.req.param('inviteId');
+    const [invite] = await db
+      .select()
+      .from(householdInvites)
+      .where(eq(householdInvites.id, inviteId))
+      .limit(1);
+    if (!invite) return c.json({ error: 'invite_invalid' }, 404);
+    await authorization.authorizeCapability(
+      id<'UserId'>(user.id),
+      id<'HouseholdId'>(invite.householdId),
+      'manage_membership',
+    );
+    if (!isInviteRevocable(toInviteRecord(invite))) {
+      return c.json({ error: 'invite_not_revocable' }, 409);
+    }
+    await db
+      .update(householdInvites)
+      .set({ status: 'revoked' })
+      .where(and(eq(householdInvites.id, inviteId), eq(householdInvites.status, 'pending')));
+    return c.json({ ok: true, status: 'revoked' });
+  });
+
+  /**
+   * Resend a pending Household Invite (issue 03). Issues a fresh single-use
+   * token and restarts the seven-day clock, then revokes the prior token so
+   * only the newest link is usable.
+   */
+  app.post('/v1/invites/:inviteId/resend', async (c) => {
+    const user = c.get('authUser');
+    const inviteId = c.req.param('inviteId');
+    const [invite] = await db
+      .select()
+      .from(householdInvites)
+      .where(eq(householdInvites.id, inviteId))
+      .limit(1);
+    if (!invite) return c.json({ error: 'invite_invalid' }, 404);
+    await authorization.authorizeCapability(
+      id<'UserId'>(user.id),
+      id<'HouseholdId'>(invite.householdId),
+      'manage_membership',
+    );
+    if (!isInviteResendable(toInviteRecord(invite))) {
+      return c.json({ error: 'invite_not_resendable' }, 409);
+    }
+
+    const token = randomBytes(18).toString('base64url');
+    const expiresAt = new Date(Date.now() + INVITE_TTL_MS);
+    await db.transaction(async (tx) => {
+      await tx
+        .update(householdInvites)
+        .set({ status: 'revoked' })
+        .where(and(eq(householdInvites.id, inviteId), eq(householdInvites.status, 'pending')));
+      await tx.insert(householdInvites).values({
+        id: randomUUID(),
+        householdId: invite.householdId,
+        role: invite.role,
+        phoneHash: invite.phoneHash,
+        token,
+        status: 'pending',
+        expiresAt,
+      });
+    });
+    return c.json({ token, role: invite.role, expiresAt: expiresAt.toISOString() }, 201);
   });
 
   app.post('/v1/invites/accept', async (c) => {
@@ -246,9 +359,17 @@ export function createApp(db: Database) {
       .from(householdInvites)
       .where(eq(householdInvites.token, token))
       .limit(1);
-    if (!invite || invite.status !== 'pending' || invite.expiresAt.getTime() < Date.now()) {
-      return c.json({ error: 'invite_invalid' }, 404);
+    if (!invite) return c.json({ error: 'invite_invalid' }, 404);
+
+    const status = acceptStatusFor(toInviteRecord(invite), {
+      verifiedPhone: user.phone,
+      now: new Date().toISOString(),
+    });
+    if (!status.ok) {
+      const code = status.error === 'invite_phone_mismatch' ? 403 : 404;
+      return c.json({ error: status.error }, code);
     }
+
     const [existingMembership] = await db
       .select()
       .from(memberships)
@@ -303,6 +424,7 @@ export function createApp(db: Database) {
       );
     }
 
+    const newMembershipId = randomUUID();
     await db.transaction(async (tx) => {
       const result = await tx
         .update(householdInvites)
@@ -312,16 +434,103 @@ export function createApp(db: Database) {
         throw new Error('invite_already_consumed');
       }
       await tx.insert(memberships).values({
-        id: randomUUID(),
+        id: newMembershipId,
         userId: user.id,
         householdId: invite.householdId,
         role: invite.role,
         status: 'active',
         notificationDefault: invite.role === 'cook' ? 'important' : 'all',
       });
+      // Attributed system event so Household Chat announces the join (issue 03,
+      // issue 06 membership surface).
+      await tx.insert(systemEvents).values({
+        id: randomUUID(),
+        householdId: invite.householdId,
+        type: 'membership.joined',
+        actorId: newMembershipId,
+        entityType: 'membership',
+        entityId: newMembershipId,
+        payload: { role: invite.role },
+      });
     });
 
     return c.json({ householdId: invite.householdId, role: invite.role });
+  });
+
+  /**
+   * Owner removes a Household Member or Cook (issue 03). The membership flips to
+   * `removed`, a `membership.removed` event is attributed in Household Chat, and
+   * the next protected read by that person is denied so the app exits to a plain
+   * explanation. An Owner cannot remove themselves this way.
+   */
+  app.delete('/v1/households/:householdId/members/:membershipId', async (c) => {
+    const user = c.get('authUser');
+    const householdId = c.req.param('householdId');
+    const membershipId = c.req.param('membershipId');
+    const principal = await authorization.authorizeCapability(
+      id<'UserId'>(user.id),
+      id<'HouseholdId'>(householdId),
+      'manage_membership',
+    );
+    const [membership] = await db
+      .select()
+      .from(memberships)
+      .where(and(eq(memberships.id, membershipId), eq(memberships.householdId, householdId)))
+      .limit(1);
+    if (!membership) return c.json({ error: 'not_found' }, 404);
+    const removalError = validateMembershipRemoval({
+      actorMembershipId: principal.membershipId,
+      targetMembershipId: membership.id,
+      targetStatus: membership.status,
+      targetRole: membership.role,
+    });
+    if (removalError === 'already_removed') return c.json({ ok: true, status: 'already_removed' });
+    if (removalError === 'cannot_remove_self') {
+      return c.json({ error: 'cannot_remove_self' }, 409);
+    }
+
+    await db.transaction(async (tx) => {
+      await tx
+        .update(memberships)
+        .set({ status: 'removed', removedAt: new Date() })
+        .where(
+          and(
+            eq(memberships.id, membershipId),
+            eq(memberships.householdId, householdId),
+            eq(memberships.status, 'active'),
+          ),
+        );
+      await tx.insert(systemEvents).values({
+        id: randomUUID(),
+        householdId,
+        type: 'membership.removed',
+        actorId: principal.membershipId,
+        entityType: 'membership',
+        entityId: membershipId,
+        payload: { role: membership.role },
+      });
+    });
+    return c.json({ ok: true, status: 'removed' });
+  });
+
+  /**
+   * Lightweight access probe for an open Household (issue 03 — removed/revoked
+   * access immediately exits protected content). The client polls this when it
+   * re-enters a Household so it can surface a plain explanation without first
+   * rendering another Household's protected data.
+   */
+  app.get('/v1/households/:householdId/access', async (c) => {
+    const user = c.get('authUser');
+    const householdId = c.req.param('householdId');
+    try {
+      const principal = await authorization.authorize(
+        id<'UserId'>(user.id),
+        id<'HouseholdId'>(householdId),
+      );
+      return c.json({ ok: true, role: principal.role, householdId });
+    } catch {
+      return c.json({ ok: false }, 403);
+    }
   });
 
   app.onError((err, c) => {
@@ -371,4 +580,30 @@ function normalizeDietStyle(
 ): 'vegetarian' | 'eggetarian' | 'nonvegetarian' {
   if (value === 'eggetarian' || value === 'nonvegetarian') return value;
   return 'vegetarian';
+}
+
+/** Map a Drizzle invite row onto the lifecycle projection. */
+function toInviteRecord(row: typeof householdInvites.$inferSelect): InviteRecord {
+  return {
+    id: row.id,
+    householdId: row.householdId,
+    role: row.role,
+    phoneHash: row.phoneHash,
+    token: row.token,
+    status: row.status,
+    createdAt: row.createdAt.toISOString(),
+    expiresAt: row.expiresAt.toISOString(),
+    acceptedByUserId: row.acceptedByUserId,
+    revokedAt: null,
+  };
+}
+
+/**
+ * A stable, non-reversable label for the invite list. Because the stored hash
+ * is one-way we cannot recover digits, so we surface the trailing hash segment
+ * as a disambiguator — enough to tell two pending invites apart, never enough
+ * to identify the recipient.
+ */
+function maskPhoneHash(phoneHash: string): string {
+  return `•••• ${phoneHash.slice(-4)}`;
 }
