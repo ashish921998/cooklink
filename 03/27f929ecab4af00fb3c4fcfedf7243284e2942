@@ -1,0 +1,28 @@
+packages/domain/src/intent.ts
+  s_1fb26871acc742::t_194988c99c67e7 132
+packages/domain/src/meal-edit.ts
+  s_1fb26871acc742::t_7e62bf68c92d7d 248
+  s_1fb26871acc742::t_21d8d6d08f9538 258-259,266
+packages/domain/src/checkout.ts
+  s_1fb26871acc742::t_e56def83037365 155
+  s_1fb26871acc742::t_2179edd33e6ba0 201
+  s_1fb26871acc742::t_c61fc6f0a3b102 124-130
+packages/domain/src/in-memory.ts
+  s_1fb26871acc742::t_115fb8389e7d81 270,272-278
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "0327f929ecab4af00fb3c4fcfedf7243284e2942",
+  "prompts": {},
+  "sessions": {
+    "s_1fb26871acc742": {
+      "agent_id": {
+        "tool": "droid",
+        "id": "92e8fc28-58b6-4244-941f-7ea7b23e2751",
+        "model": "auto"
+      },
+      "human_author": "Ashish Huddar <ashish.hudar@gmail.com>"
+    }
+  }
+}
