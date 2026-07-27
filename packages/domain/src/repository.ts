@@ -135,6 +135,16 @@ export interface Repository extends AuthorizationLookup {
     householdId: HouseholdId,
     entry: Omit<PantryLedgerEntry, 'id' | 'householdId'>,
   ): Promise<void>;
+  /**
+   * Replace all `consumption`-source ledger entries for a Household with the
+   * given derived entries (issue 09, AC#2 — recalculated after structured plan
+   * changes). Other sources (`order_delivered`, `request_override`,
+   * `member_edit`) are preserved.
+   */
+  replaceConsumptionLedger(
+    householdId: HouseholdId,
+    entries: Omit<PantryLedgerEntry, 'id' | 'householdId'>[],
+  ): Promise<void>;
   listPantryLedger(householdId: HouseholdId, ingredientKey: string): Promise<PantryLedgerEntry[]>;
 
   // ---- chat ----

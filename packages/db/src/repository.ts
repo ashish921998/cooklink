@@ -459,6 +459,32 @@ export class DrizzleRepository implements Repository {
       .values({ id: randomUUID(), householdId, ...entry, at: new Date(entry.at) });
   }
 
+  async replaceConsumptionLedger(
+    householdId: HouseholdId,
+    entries: Omit<PantryLedgerEntry, 'id' | 'householdId'>[],
+  ) {
+    await this.db.transaction(async (tx) => {
+      await tx
+        .delete(s.pantryLedger)
+        .where(
+          and(
+            eq(s.pantryLedger.householdId, householdId),
+            eq(s.pantryLedger.source, 'consumption'),
+          ),
+        );
+      if (entries.length > 0) {
+        await tx.insert(s.pantryLedger).values(
+          entries.map((entry) => ({
+            id: randomUUID(),
+            householdId,
+            ...entry,
+            at: new Date(entry.at),
+          })),
+        );
+      }
+    });
+  }
+
   async listPantryLedger(householdId: HouseholdId, ingredientKey: string) {
     const rows = await this.db
       .select()

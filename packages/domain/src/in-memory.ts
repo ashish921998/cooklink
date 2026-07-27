@@ -377,6 +377,19 @@ export class InMemoryRepository implements Repository {
   ): Promise<void> {
     this.ledger.push({ ...entry, id: crypto.randomUUID(), householdId });
   }
+  async replaceConsumptionLedger(
+    householdId: HouseholdId,
+    entries: Omit<PantryLedgerEntry, 'id' | 'householdId'>[],
+  ): Promise<void> {
+    const kept = this.ledger.filter(
+      (e) => !(e.householdId === householdId && e.source === 'consumption'),
+    );
+    for (const entry of entries) {
+      kept.push({ ...entry, id: crypto.randomUUID(), householdId });
+    }
+    this.ledger.length = 0;
+    this.ledger.push(...kept);
+  }
   async listPantryLedger(
     householdId: HouseholdId,
     ingredientKey: string,

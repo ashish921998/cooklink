@@ -23,6 +23,7 @@ import {
   mealPlanBulkPayload,
   planRegeneration,
   rankSearchCandidates,
+  refreshSuggestedCart,
   renderEvent,
   swapMealIdentities,
   todayISO,
@@ -34,6 +35,7 @@ import {
   type Language,
   type MealPatch,
   type PlannedMeal,
+  type SuggestedCartItem,
   type SystemEventType,
 } from '@cooklink/domain';
 import {
@@ -50,6 +52,7 @@ import {
   systemEvents,
   users,
   voiceTranscripts,
+  DrizzleRepository,
 } from '@cooklink/db';
 import type { Database } from '@cooklink/db';
 import { authMiddleware, type AuthEnv } from './auth.js';
@@ -2212,6 +2215,93 @@ export function createApp(db: Database, services?: AppServices) {
     },
   );
 
+  /**
+   * The Suggested Grocery Cart for today plus the next two calendar days
+   * (ticket 09). All active participants may view it. The endpoint rebuilds
+   * the Estimated Pantry consumption ledger from the current plan and then
+   * produces the cart: likely-available ingredients are omitted, uncertain
+   * items appear as "Check at home", and approved Grocery Requests always
+   * override the pantry. Every line explains the affected meal and need day.
+   */
+  app.get('/v1/households/:householdId/suggested-cart', async (c) => {
+    const user = c.get('authUser');
+    const householdId = c.req.param('householdId');
+    const principal = await authorization.authorize(
+      id<'UserId'>(user.id),
+      id<'HouseholdId'>(householdId),
+    );
+    const repo = new DrizzleRepository(db);
+    const items = await refreshSuggestedCart(
+      repo,
+      principal.householdId,
+      todayISO(),
+      new Date(),
+    );
+    return c.json({ items: items.map(serializeSuggestedCartItem) });
+  });
+
+  /**
+   * A Household Member keeps or removes a cart line without opening a separate
+   * pantry screen (ticket 09, AC#6). An optional removal reason improves later
+   * estimates without requiring routine stock entry (AC#7). Cooks cannot edit
+   * the cart (capability `add_to_cart` is Member/Owner only).
+   */
+  app.patch('/v1/households/:householdId/suggested-cart/:itemId', async (c) => {
+    const user = c.get('authUser');
+    const householdId = c.req.param('householdId');
+    const principal = await authorization.authorizeCapability(
+      id<'UserId'>(user.id),
+      id<'HouseholdId'>(householdId),
+      'add_to_cart',
+    );
+    const itemId = c.req.param('itemId');
+    const body: {
+      state?: 'kept' | 'removed';
+      removalReason?: 'already_have' | 'not_needed' | 'buy_later' | null;
+    } = await c.req.json().catch(() => ({}));
+    if (body.state !== 'kept' && body.state !== 'removed') {
+      return c.json({ error: 'state_required' }, 400);
+    }
+    const ALLOWED_REMOVAL_REASONS = new Set(['already_have', 'not_needed', 'buy_later']);
+    const removalReason =
+      body.removalReason && ALLOWED_REMOVAL_REASONS.has(body.removalReason)
+        ? (body.removalReason as 'already_have' | 'not_needed' | 'buy_later')
+        : null;
+
+    const [existing] = await db
+      .select()
+      .from(suggestedCartItems)
+      .where(
+        and(
+          eq(suggestedCartItems.id, itemId),
+          eq(suggestedCartItems.householdId, principal.householdId),
+        ),
+      )
+      .limit(1);
+    if (!existing) return c.json({ error: 'not_found' }, 404);
+
+    await db
+      .update(suggestedCartItems)
+      .set({ memberState: body.state, removalReason })
+      .where(
+        and(
+          eq(suggestedCartItems.id, itemId),
+          eq(suggestedCartItems.householdId, principal.householdId),
+        ),
+      );
+    const [updated] = await db
+      .select()
+      .from(suggestedCartItems)
+      .where(
+        and(
+          eq(suggestedCartItems.id, itemId),
+          eq(suggestedCartItems.householdId, principal.householdId),
+        ),
+      )
+      .limit(1);
+    return c.json({ item: serializeSuggestedCartItem(toDomainCartItem(updated!)) });
+  });
+
   app.onError((err, c) => {
     if (err instanceof AuthorizationDeniedError) {
       // Structured authorization-denial log (issue 07, AC#5 / AC#19). Denials
@@ -2531,6 +2621,40 @@ function serializeGroceryRequest(request: GroceryRequest) {
     resolvedById: request.resolvedById ? (request.resolvedById as string) : null,
     resolvedAt: request.resolvedAt,
     version: request.version,
+  };
+}
+
+/** Map a Drizzle suggested-cart row onto the domain {@link SuggestedCartItem}. */
+function toDomainCartItem(row: (typeof suggestedCartItems)['$inferSelect']): SuggestedCartItem {
+  return {
+    id: row.id,
+    householdId: id<'HouseholdId'>(row.householdId),
+    ingredientKey: row.ingredientKey,
+    groceryRequestId: row.groceryRequestId
+      ? id<'GroceryRequestId'>(row.groceryRequestId)
+      : null,
+    freeTextItem: row.freeTextItem,
+    needDay: row.needDay as SuggestedCartItem['needDay'],
+    affectedMeals: row.affectedMeals as SuggestedCartItem['affectedMeals'],
+    confidence: row.confidence as SuggestedCartItem['confidence'],
+    memberState: row.memberState as SuggestedCartItem['memberState'],
+    removalReason: (row.removalReason ?? null) as SuggestedCartItem['removalReason'],
+  };
+}
+
+/** Serialize a Suggested Grocery Cart item for the API (ticket 09). */
+function serializeSuggestedCartItem(item: SuggestedCartItem) {
+  return {
+    id: item.id,
+    ingredientKey: item.ingredientKey,
+    groceryRequestId: item.groceryRequestId ? (item.groceryRequestId as string) : null,
+    freeTextItem: item.freeTextItem,
+    needDay: item.needDay,
+    affectedMeals: item.affectedMeals,
+    confidence: item.confidence,
+    memberState: item.memberState,
+    removalReason: item.removalReason,
+    checkAtHome: item.confidence !== 'likely_available',
   };
 }
 
