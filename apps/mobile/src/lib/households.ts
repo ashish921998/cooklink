@@ -17,6 +17,7 @@ export type HouseholdSummary = {
   servingCount: number;
   mealStyle: string;
   dietStyle: string;
+  defaultLanguage: 'en' | 'hi';
 };
 
 export type MealType = 'breakfast' | 'lunch' | 'dinner';
@@ -27,7 +28,10 @@ export type PlannedMeal = {
   mealType: MealType;
   name: string;
   servings: number;
+  servingsOverridden: boolean;
   isSpecial: boolean;
+  version: number;
+  recipeId: string | null;
 };
 
 export type HouseholdMember = {
@@ -42,6 +46,14 @@ export type InviteSummary = {
   role: 'member' | 'cook';
   phoneMasked: string;
   expiresAt: string;
+};
+
+export type RecipeSearchResult = {
+  recipeId: string;
+  name: string;
+  nameHi: string | null;
+  dietStyle: string;
+  dietMismatch: boolean;
 };
 
 /** The two areas a person with both kinds of membership moves between. */

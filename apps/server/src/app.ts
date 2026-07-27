@@ -62,6 +62,30 @@ export interface AppServices {
   transcription?: TranscriptionService;
 }
 
+/** Thrown inside the swap transaction so a stale side rolls back both writes. */
+class StaleSwapError extends Error {
+  constructor(readonly side: 'a' | 'b') {
+    super('stale_swap');
+    this.name = 'StaleSwapError';
+  }
+}
+
+/** Thrown when the invite was already consumed by a concurrent acceptance. */
+class InviteAlreadyConsumedError extends Error {
+  constructor() {
+    super('invite_already_consumed');
+    this.name = 'InviteAlreadyConsumedError';
+  }
+}
+
+/** Thrown when an in-transaction limit check fails during invite acceptance. */
+class InviteConflictError extends Error {
+  constructor(readonly code: string) {
+    super(code);
+    this.name = 'InviteConflictError';
+  }
+}
+
 export function createApp(db: Database, services?: AppServices) {
   const app = new Hono<AuthEnv>();
   const authorization = new Authorization(new DrizzleAuthorizationLookup(db));
@@ -111,6 +135,7 @@ export function createApp(db: Database, services?: AppServices) {
         servingCount: row.household.servingCount,
         mealStyle: row.household.mealStyle,
         dietStyle: row.household.dietStyle,
+        defaultLanguage: row.household.defaultLanguage,
       })),
     });
   });
@@ -348,24 +373,57 @@ export function createApp(db: Database, services?: AppServices) {
 
     const swap = swapMealIdentities(aDecision.result, bDecision.result);
     // Both meal writes and both attribution events run in one transaction so a
-    // mid-swap failure leaves no half-swapped state and no orphan event.
-    const { persistedA, persistedB, stale } = await db.transaction(async (tx) => {
-      const a = await applyMealPatch(tx, aRow.id, principal.householdId, {
-        ...aDecision.result,
-        ...swap.a,
+    // mid-swap failure leaves no half-swapped state and no orphan event. A
+    // stale version on either side must THROW inside the transaction so the
+    // whole swap is rolled back; returning normally would commit the side that
+    // succeeded, leaving a half-swapped plan (item 4).
+    let persistedA: PlannedMealRow | null = null;
+    let persistedB: PlannedMealRow | null = null;
+    let staleSide: 'a' | 'b' | null = null;
+    try {
+      const result = await db.transaction(async (tx) => {
+        const a = await applyMealPatch(tx, aRow.id, principal.householdId, {
+          ...aDecision.result,
+          ...swap.a,
+        });
+        const b = await applyMealPatch(tx, bRow.id, principal.householdId, {
+          ...bDecision.result,
+          ...swap.b,
+        });
+        if (!a || !b) {
+          // Throwing here forces a rollback of both writes so a stale side
+          // cannot leave the other side committed.
+          throw new StaleSwapError(!a ? 'a' : 'b');
+        }
+        await recordMealChangedEvent(tx, principal.householdId, principal.membershipId, a);
+        await recordMealChangedEvent(tx, principal.householdId, principal.membershipId, b);
+        return { persistedA: a, persistedB: b };
       });
-      const b = await applyMealPatch(tx, bRow.id, principal.householdId, {
-        ...bDecision.result,
-        ...swap.b,
-      });
-      if (!a || !b) return { persistedA: a, persistedB: b, stale: true as const };
-      await recordMealChangedEvent(tx, principal.householdId, principal.membershipId, a);
-      await recordMealChangedEvent(tx, principal.householdId, principal.membershipId, b);
-      return { persistedA: a, persistedB: b, stale: false as const };
-    });
-    if (stale) {
-      const failed = !persistedA ? aRow : bRow;
-      return c.json({ error: 'stale_version', current: serializePlannedMeal(failed) }, 409);
+      persistedA = result.persistedA;
+      persistedB = result.persistedB;
+    } catch (err) {
+      if (err instanceof StaleSwapError) {
+        staleSide = err.side;
+      } else {
+        throw err;
+      }
+    }
+    if (staleSide) {
+      const failedId = staleSide === 'a' ? aRow.id : bRow.id;
+      const [fresh] = await db
+        .select()
+        .from(plannedMeals)
+        .where(
+          and(
+            eq(plannedMeals.id, failedId),
+            eq(plannedMeals.householdId, principal.householdId),
+          ),
+        )
+        .limit(1);
+      return c.json(
+        { error: 'stale_version', current: fresh ? serializePlannedMeal(fresh) : null },
+        409,
+      );
     }
     return c.json({
       meals: [serializePlannedMeal(persistedA!), serializePlannedMeal(persistedB!)],
@@ -514,55 +572,51 @@ export function createApp(db: Database, services?: AppServices) {
       dietStyle?: 'vegetarian' | 'eggetarian' | 'nonvegetarian';
       specialMealEnabled?: boolean;
     } = await c.req.json().catch(() => ({}));
-    const [existingHome] = await db
-      .select({
-        household: households,
-        ownerMembershipId: memberships.id,
-      })
-      .from(memberships)
-      .innerJoin(households, eq(households.id, memberships.householdId))
-      .where(
-        and(
-          eq(memberships.userId, user.id),
-          eq(memberships.role, 'owner'),
-          eq(memberships.status, 'active'),
-          isNull(households.closedAt),
-        ),
-      )
-      .limit(1);
-    if (existingHome) {
-      const existingMeals = await ensureStarterPlan(
-        db,
-        existingHome.household,
-        existingHome.ownerMembershipId,
-      );
-      return c.json({
-        householdId: existingHome.household.id,
-        planStart: existingMeals[0]?.date ?? todayISO(),
-        mealCount: existingMeals.length,
-        resumed: true,
-      });
-    }
 
-    const householdId = randomUUID();
-    const ownerMembershipId = randomUUID();
-    const servingCount = clampServingCount(body.servingCount);
-    const mealStyle = body.mealStyle === 'south' ? 'south' : 'north';
-    const dietStyle = normalizeDietStyle(body.dietStyle);
-    const specialMealEnabled = body.specialMealEnabled === true;
-    const planStart = todayISO();
-    const meals = generateStarterPlan(planStart, {
-      dietStyle,
-      mealStyle,
-      servings: servingCount,
-      specialMealEnabled,
-    }).map((meal) => ({
-      id: randomUUID(),
-      householdId,
-      ...meal,
-      updatedBy: ownerMembershipId,
-    }));
-    await db.transaction(async (tx) => {
+    // The existing-household check and the creation run in one transaction
+    // with a FOR UPDATE lock so two concurrent setup submissions cannot both
+    // see no household and both create one (P2 — duplicate households under
+    // concurrent retry). The lock serializes on the user's owner memberships.
+    const setupResult = await db.transaction(async (tx) => {
+      const [existingHome] = await tx
+        .select({
+          household: households,
+          ownerMembershipId: memberships.id,
+        })
+        .from(memberships)
+        .innerJoin(households, eq(households.id, memberships.householdId))
+        .where(
+          and(
+            eq(memberships.userId, user.id),
+            eq(memberships.role, 'owner'),
+            eq(memberships.status, 'active'),
+            isNull(households.closedAt),
+          ),
+        )
+        .for('update')
+        .limit(1);
+      if (existingHome) {
+        return { kind: 'existing' as const, home: existingHome };
+      }
+
+      const householdId = randomUUID();
+      const ownerMembershipId = randomUUID();
+      const servingCount = clampServingCount(body.servingCount);
+      const mealStyle = body.mealStyle === 'south' ? 'south' : 'north';
+      const dietStyle = normalizeDietStyle(body.dietStyle);
+      const specialMealEnabled = body.specialMealEnabled === true;
+      const planStart = todayISO();
+      const meals = generateStarterPlan(planStart, {
+        dietStyle,
+        mealStyle,
+        servings: servingCount,
+        specialMealEnabled,
+      }).map((meal) => ({
+        id: randomUUID(),
+        householdId,
+        ...meal,
+        updatedBy: ownerMembershipId,
+      }));
       await tx.insert(households).values({
         id: householdId,
         name: body.name?.trim() || 'My Home',
@@ -582,8 +636,31 @@ export function createApp(db: Database, services?: AppServices) {
         notificationDefault: 'all',
       });
       await tx.insert(plannedMeals).values(meals);
+      return {
+        kind: 'created' as const,
+        householdId,
+        planStart,
+        mealCount: meals.length,
+      };
     });
-    return c.json({ householdId, planStart, mealCount: meals.length }, 201);
+
+    if (setupResult.kind === 'existing') {
+      const existingMeals = await ensureStarterPlan(
+        db,
+        setupResult.home.household,
+        setupResult.home.ownerMembershipId,
+      );
+      return c.json({
+        householdId: setupResult.home.household.id,
+        planStart: existingMeals[0]?.date ?? todayISO(),
+        mealCount: existingMeals.length,
+        resumed: true,
+      });
+    }
+    return c.json(
+      { householdId: setupResult.householdId, planStart: setupResult.planStart, mealCount: setupResult.mealCount },
+      201,
+    );
   });
 
   app.post('/v1/households/:householdId/invites', async (c) => {
@@ -797,34 +874,104 @@ export function createApp(db: Database, services?: AppServices) {
     }
 
     const newMembershipId = randomUUID();
-    await db.transaction(async (tx) => {
-      const result = await tx
-        .update(householdInvites)
-        .set({ status: 'accepted', acceptedByUserId: user.id })
-        .where(and(eq(householdInvites.id, invite.id), eq(householdInvites.status, 'pending')));
-      if (result[0].affectedRows !== 1) {
-        throw new Error('invite_already_consumed');
+    try {
+      await db.transaction(async (tx) => {
+        // The invite status update is the primary serialization point: the
+        // `WHERE status = 'pending'` guard ensures only one concurrent
+        // acceptance of the same invite can proceed (affectedRows !== 1).
+        const result = await tx
+          .update(householdInvites)
+          .set({ status: 'accepted', acceptedByUserId: user.id })
+          .where(and(eq(householdInvites.id, invite.id), eq(householdInvites.status, 'pending')));
+        if (result[0].affectedRows !== 1) {
+          throw new InviteAlreadyConsumedError();
+        }
+
+        // Re-check the limits INSIDE the transaction so concurrent
+        // acceptances of different invites cannot both pass. The counts are
+        // read after the invite lock, narrowing the race window. The unique
+        // index on (userId, householdId, status) is the final backstop: a
+        // duplicate active membership insert throws and rolls back both writes.
+        const [conflictingMembership] = await tx
+          .select()
+          .from(memberships)
+          .where(
+            and(
+              eq(memberships.userId, user.id),
+              eq(memberships.householdId, invite.householdId),
+              eq(memberships.status, 'active'),
+            ),
+          )
+          .limit(1);
+        if (conflictingMembership) {
+          throw new InviteConflictError('already_member');
+        }
+
+        if (invite.role === 'cook') {
+          const [householdCookCount] = await tx
+            .select({ value: count() })
+            .from(memberships)
+            .where(
+              and(
+                eq(memberships.householdId, invite.householdId),
+                eq(memberships.role, 'cook'),
+                eq(memberships.status, 'active'),
+              ),
+            );
+          if ((householdCookCount?.value ?? 0) >= 2) {
+            throw new InviteConflictError('cook_limit_reached');
+          }
+
+          const [cookHouseholdCount] = await tx
+            .select({ value: count() })
+            .from(memberships)
+            .where(
+              and(
+                eq(memberships.userId, user.id),
+                eq(memberships.role, 'cook'),
+                eq(memberships.status, 'active'),
+              ),
+            );
+          if ((cookHouseholdCount?.value ?? 0) >= 30) {
+            throw new InviteConflictError('cook_household_limit_reached');
+          }
+        }
+
+        await tx.insert(memberships).values({
+          id: newMembershipId,
+          userId: user.id,
+          householdId: invite.householdId,
+          role: invite.role,
+          status: 'active',
+          notificationDefault: invite.role === 'cook' ? 'important' : 'all',
+        });
+        // Attributed system event so Household Chat announces the join (issue 03,
+        // issue 06 membership surface).
+        await tx.insert(systemEvents).values({
+          id: randomUUID(),
+          householdId: invite.householdId,
+          type: 'membership.joined',
+          actorId: newMembershipId,
+          entityType: 'membership',
+          entityId: newMembershipId,
+          payload: { role: invite.role },
+        });
+      });
+    } catch (err) {
+      if (err instanceof InviteAlreadyConsumedError) {
+        return c.json({ error: 'invite_invalid' }, 404);
       }
-      await tx.insert(memberships).values({
-        id: newMembershipId,
-        userId: user.id,
-        householdId: invite.householdId,
-        role: invite.role,
-        status: 'active',
-        notificationDefault: invite.role === 'cook' ? 'important' : 'all',
-      });
-      // Attributed system event so Household Chat announces the join (issue 03,
-      // issue 06 membership surface).
-      await tx.insert(systemEvents).values({
-        id: randomUUID(),
-        householdId: invite.householdId,
-        type: 'membership.joined',
-        actorId: newMembershipId,
-        entityType: 'membership',
-        entityId: newMembershipId,
-        payload: { role: invite.role },
-      });
-    });
+      if (err instanceof InviteConflictError) {
+        return c.json({ error: err.code }, 409);
+      }
+      // A duplicate-key error from the unique index on (userId, householdId,
+      // status) means a concurrent acceptance already created the active
+      // membership — surface it as a conflict, not a 500.
+      if (err instanceof Error && /Duplicate entry/i.test(err.message)) {
+        return c.json({ error: 'already_member' }, 409);
+      }
+      throw err;
+    }
 
     return c.json({ householdId: invite.householdId, role: invite.role });
   });
@@ -862,6 +1009,18 @@ export function createApp(db: Database, services?: AppServices) {
     }
 
     await db.transaction(async (tx) => {
+      // Prune any prior `removed` row for the same (userId, householdId) so the
+      // unique index on (userId, householdId, status) is not violated when the
+      // active row is flipped to `removed` (e.g. re-invite then re-remove).
+      await tx
+        .delete(memberships)
+        .where(
+          and(
+            eq(memberships.userId, membership.userId),
+            eq(memberships.householdId, householdId),
+            eq(memberships.status, 'removed'),
+          ),
+        );
       await tx
         .update(memberships)
         .set({ status: 'removed', removedAt: new Date() })

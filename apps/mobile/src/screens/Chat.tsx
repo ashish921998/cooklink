@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
   Image,
@@ -51,14 +51,38 @@ export function ChatScreen({
   const isCook = household.role === 'cook';
   const { getToken } = useAuth();
 
-  // Mark-read is best-effort when the newest item is visible. We track the
-  // latest id seen at the bottom of the list and post it once per arrival.
+  // Mark-read is best-effort when the newest item is actually visible on
+  // screen. We track the visible item IDs via FlatList's onViewableItemsChanged
+  // and only advance the read cursor when the newest human message is among
+  // them — never just because Chat is open (issue 06 — opening a long
+  // conversation must not advance unread position past unseen messages).
   const markedRef = useRef<string | null>(null);
+  const visibleIdsRef = useRef<Set<string>>(new Set());
   // An inline upload error message, shown above the composer until dismissed
   // (ticket 06, AC#1 — a failed upload cannot be silently swallowed).
   const [uploadError, setUploadError] = useState<string | null>(null);
 
   const chat = useHouseholdChat(household.id, membershipId);
+
+  // The last human message drives the read position, not the last event.
+  const newestMessageId = chat.items.findLast((t) => t.kind === 'message')?.id;
+
+  // Check whether the newest human message is currently visible and, if so,
+  // advance the read cursor. Called after viewability changes and when new
+  // items arrive.
+  const maybeMarkRead = useCallback(() => {
+    if (!newestMessageId || !membershipId) return;
+    if (markedRef.current === newestMessageId) return;
+    if (!visibleIdsRef.current.has(newestMessageId)) return;
+    markedRef.current = newestMessageId;
+    void chat.markRead(newestMessageId);
+  }, [chat, membershipId, newestMessageId]);
+
+  // Re-check whenever the newest message changes (e.g. a poll brought new
+  // items). The actual mark-read only fires if that message is visible.
+  useEffect(() => {
+    maybeMarkRead();
+  }, [maybeMarkRead]);
 
   // A removed participant exits immediately with a plain explanation (issue 06,
   // AC#19 — removed participants immediately lose Chat access).
@@ -114,6 +138,11 @@ export function ChatScreen({
           )
         }
         onEndReachedThreshold={0.2}
+        onViewableItemsChanged={({ viewableItems }) => {
+          visibleIdsRef.current = new Set(viewableItems.map((v) => v.key));
+          maybeMarkRead();
+        }}
+        viewabilityConfig={{ itemVisiblePercentThreshold: 50 }}
       />
       {uploadError ? (
         <View style={styles.uploadErrorBox}>
@@ -162,17 +191,6 @@ export function ChatScreen({
             }
           })();
         }}
-        onMountedAtBottom={(id) => {
-          // Mark read through the newest human message when Chat is open and the
-          // latest position is visible. System events never move the read cursor
-          // (issue 06 — routine events do not add unread debt). Best-effort.
-          if (id && membershipId && markedRef.current !== id) {
-            markedRef.current = id;
-            void chat.markRead(id);
-          }
-        }}
-        // The last human message drives the read position, not the last event.
-        newestItemId={chat.items.findLast((t) => t.kind === 'message')?.id}
       />
     </KeyboardAvoidingView>
   );
@@ -650,27 +668,17 @@ function Composer({
   onSend,
   onSendPhoto,
   onSendVoice,
-  onMountedAtBottom,
-  newestItemId,
 }: {
   disabled: boolean;
   onSend: (body: string) => void;
   onSendPhoto: (data: ArrayBuffer, contentType: string, caption: string | null) => void;
   onSendVoice: (data: ArrayBuffer, contentType: string, durationMs: number) => void;
-  onMountedAtBottom: (id: string | undefined) => void;
-  newestItemId: string | undefined;
 }) {
   const [draft, setDraft] = useState('');
   const [captionDraft, setCaptionDraft] = useState('');
   const [showCaption, setShowCaption] = useState(false);
   const [recording, setRecording] = useState(false);
   const [recordMs, setRecordMs] = useState(0);
-
-  // When the newest server item changes and the composer is mounted (i.e. Chat
-  // is open and the latest position is visible), report it for mark-read.
-  useEffect(() => {
-    onMountedAtBottom(newestItemId);
-  }, [newestItemId, onMountedAtBottom]);
 
   // Voice recording timer (ticket 06, AC#2 — bounded at two minutes).
   useEffect(() => {

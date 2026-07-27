@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { Linking, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { useApi } from '../lib/api';
 import {
   useAccessProbe,
@@ -161,6 +161,32 @@ function OwnerMembership({
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Open WhatsApp with a pre-filled invite message so the Owner delivers the
+  // token through WhatsApp as required (issue 03 — invites are shared through
+  // WhatsApp). Falls back to displaying the token if WhatsApp is unavailable.
+  async function sendViaWhatsApp(
+    invitePhone: string,
+    inviteToken: string,
+    inviteRole: 'member' | 'cook',
+  ) {
+    const normalized = invitePhone.replace(/[^\d]/g, '');
+    const message = `You're invited to join ${household.name} as a ${inviteRole} on Cooklink. Open the app and enter this invite token: ${inviteToken}`;
+    const url = `https://wa.me/${normalized}?text=${encodeURIComponent(message)}`;
+    try {
+      const canOpen = await Linking.canOpenURL(url);
+      if (canOpen) {
+        await Linking.openURL(url);
+        setNotice(`WhatsApp opened with the ${inviteRole} invite message.`);
+        return;
+      }
+    } catch {
+      // Fall through to the manual fallback below.
+    }
+    setNotice(
+      `WhatsApp is not available. Share this token with the ${inviteRole}: ${inviteToken}`,
+    );
+  }
+
   async function createInvite() {
     setBusy(true);
     setError(null);
@@ -170,7 +196,7 @@ function OwnerMembership({
         method: 'POST',
         body: JSON.stringify({ phone, role }),
       });
-      setNotice(`Invite created. Share this token with the ${role}: ${result.token}`);
+      await sendViaWhatsApp(phone, result.token, role);
       setPhoneState('');
       onChanged();
     } catch (err) {
@@ -183,11 +209,17 @@ function OwnerMembership({
   async function resend(inviteId: string) {
     setBusy(true);
     setError(null);
+    setNotice(null);
     try {
-      const result = await api<{ token: string }>(`/v1/invites/${inviteId}/resend`, {
-        method: 'POST',
-      });
-      setNotice(`Resent. New token: ${result.token}`);
+      const result = await api<{ token: string; role: 'member' | 'cook' }>(
+        `/v1/invites/${inviteId}/resend`,
+        { method: 'POST' },
+      );
+      // The invite's phone is masked in the list; use the raw phone the owner
+      // entered for the WhatsApp link. If the owner navigated away, fall back
+      // to displaying the token.
+      const invitePhone = phone || '';
+      await sendViaWhatsApp(invitePhone, result.token, result.role);
       onChanged();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not resend the invite.');

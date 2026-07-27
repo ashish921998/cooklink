@@ -43,7 +43,15 @@ export function CookShell({
   const selected = households.find((h) => h.id === openId) ?? null;
 
   if (!selected) {
-    return <CookHouseholdList households={households} onSelect={onSelectHousehold} />;
+    return (
+      <CookHouseholdList
+        households={households}
+        onSelect={(householdId) => {
+          setOpenId(householdId);
+          onSelectHousehold(householdId);
+        }}
+      />
+    );
   }
 
   return (

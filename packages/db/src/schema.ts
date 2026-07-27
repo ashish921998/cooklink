@@ -82,7 +82,15 @@ export const memberships = mysqlTable(
   (t) => ({
     householdIdx: index('householdIdx').on(t.householdId),
     userIdx: index('userIdx').on(t.userId),
-    userHouseholdIdx: index('userHouseholdIdx').on(t.userId, t.householdId),
+    // A unique index on (userId, householdId, status) prevents two concurrent
+    // invite acceptances from inserting duplicate active memberships for the
+    // same person/household pair (one role per person/household). Removed
+    // memberships are pruned before re-removal so the unique constraint holds.
+    userHouseholdStatusIdx: uniqueIndex('userHouseholdStatusIdx').on(
+      t.userId,
+      t.householdId,
+      t.status,
+    ),
   }),
 );
 
