@@ -1,0 +1,73 @@
+packages/db/src/repository.ts
+  s_a2a4278cfb6b3d::t_efdb8b7b3329c4 462-487
+packages/domain/src/repository.ts
+  s_a2a4278cfb6b3d::t_4b8776f4a038bb 138-147
+apps/server/src/app.ts
+  s_a2a4278cfb6b3d::t_f17730b5fab798 2218-2304
+  s_a2a4278cfb6b3d::t_0fad471376d751 2627-2660
+  s_a2a4278cfb6b3d::t_3f51a19f2eda41 26,38,55
+packages/domain/src/tests/cart-integration.test.ts
+  s_a2a4278cfb6b3d::t_5f98cf108073cc 78
+  s_a2a4278cfb6b3d::t_a1c23175f93653 1-9,12-77,79-159,161-180,182-191,193-196,198-199,201-208,210-217,220,222-224,226-233,237,239-242,244-246,248-286,288-291,293-336,338-340,344-383,385-426,428-465,467-473,511-525,527-547,549-564,566-595,599-600,603,611-655,657-661,663-678,681-691,693-695
+  s_a2a4278cfb6b3d::t_dbfeb61213cdf1 341-343
+  s_a2a4278cfb6b3d::t_3626feb3d8b936 679-680
+  s_a2a4278cfb6b3d::t_a6d35fe8837329 11
+  s_a2a4278cfb6b3d::t_e231c82b491599 474-510
+  s_a2a4278cfb6b3d::t_c171a5953bd550 596-598,601-602,604-610
+  s_a2a4278cfb6b3d::t_cade98830c77b7 192,197,200
+  s_a2a4278cfb6b3d::t_fc1fcf3f797b64 218-219,221,225,234-236,238,243,247
+  s_a2a4278cfb6b3d::t_b6f4b20bb80a2f 10
+  s_a2a4278cfb6b3d::t_fa7c7164a4cdf4 160
+  s_a2a4278cfb6b3d::t_f586308cc74dac 181
+  s_a2a4278cfb6b3d::t_fe1af9a18e1aeb 209
+  s_a2a4278cfb6b3d::t_9fc693254e37d5 287
+  s_a2a4278cfb6b3d::t_d525be9a991780 292
+  s_a2a4278cfb6b3d::t_bc14eda799ef5f 337
+  s_a2a4278cfb6b3d::t_ab3ffa97a48439 384
+  s_a2a4278cfb6b3d::t_a979228da0ccc3 427
+  s_a2a4278cfb6b3d::t_769206f0edfe6c 466
+  s_a2a4278cfb6b3d::t_cade477f0381ce 526
+  s_a2a4278cfb6b3d::t_03ca85c6b11096 548
+  s_a2a4278cfb6b3d::t_719dbe7ee1c81d 565
+  s_a2a4278cfb6b3d::t_40d6f056d73c79 656
+  s_a2a4278cfb6b3d::t_278cf3f9503793 662
+  s_a2a4278cfb6b3d::t_8b92449f8f078b 692
+  s_a2a4278cfb6b3d::t_1e39f6ea2ad7e7 696-698
+  s_a2a4278cfb6b3d::t_c8f51854b01190 699-703
+apps/server/src/tests/suggested-cart.routes.test.ts
+  s_a2a4278cfb6b3d::t_cb15fe9d37ef4f 1-152
+packages/domain/src/cart.ts
+  s_a2a4278cfb6b3d::t_5f7da4a2b2faad 182-185,190,197-208,210-212,214-300,302-317,319-325,338-343,345-346,348-349
+  s_a2a4278cfb6b3d::t_776008032f31b1 186-189,191-196,209,213
+  s_a2a4278cfb6b3d::t_0a49f945a7822b 145,148
+  s_a2a4278cfb6b3d::t_52f8d3d75f728f 16
+  s_a2a4278cfb6b3d::t_a9f0cf039aa6cc 13
+  s_a2a4278cfb6b3d::t_ca561bf32f3ed3 326-337,344
+  s_a2a4278cfb6b3d::t_e37058c043fbaf 5
+  s_a2a4278cfb6b3d::t_8bd43bf3955b54 347
+  s_a2a4278cfb6b3d::t_8267b7e0c8a507 97,99,117-120,131,135-136
+  s_a2a4278cfb6b3d::t_2278ad1ff41337 33-38
+  s_a2a4278cfb6b3d::t_4244c0c9b444ce 301
+  s_a2a4278cfb6b3d::t_5f376af1a6a080 318
+  s_a2a4278cfb6b3d::t_9160b312ed0eed 350-352
+  s_a2a4278cfb6b3d::t_91bf1596544799 353
+packages/domain/src/in-memory.ts
+  s_a2a4278cfb6b3d::t_b529f80714bcc7 380-383,385-387,389,392
+  s_a2a4278cfb6b3d::t_fbf836cf7ac59e 384,388,390-391
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "a218f9e2bff7ef1a36f6d393faa5eb6eebd1b265",
+  "prompts": {},
+  "sessions": {
+    "s_a2a4278cfb6b3d": {
+      "agent_id": {
+        "tool": "droid",
+        "id": "9b274a93-25f4-467a-8c01-a05ffba27d7e",
+        "model": "glm-5.2"
+      },
+      "human_author": "Ashish Huddar <ashish.hudar@gmail.com>"
+    }
+  }
+}
