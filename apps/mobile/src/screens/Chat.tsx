@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
+  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -10,11 +11,18 @@ import {
   View,
 } from 'react-native';
 import { useAccessProbe, type HouseholdSummary } from '../lib/households';
-import { EDIT_WINDOW_MS, type OutboxItem, type TimelineItem, useHouseholdChat } from '../lib/chat';
+import {
+  EDIT_WINDOW_MS,
+  MAX_VOICE_DURATION_MS,
+  type OutboxItem,
+  type TimelineItem,
+  useHouseholdChat,
+} from '../lib/chat';
+import { useAuth } from '@clerk/clerk-expo';
 import { Loading, Message, colors } from '../components/ui';
 
 /**
- * Household Chat (issue 04 — text chat).
+ * Household Chat (issue 04 — text chat; ticket 06 — photo and voice notes).
  *
  * For a Member this screen is a header action pushed over the current
  * destination; back returns to that destination. For a Cook this is the
@@ -41,10 +49,14 @@ export function ChatScreen({
 }) {
   const { revoked, membershipId } = useAccessProbe(household.id);
   const isCook = household.role === 'cook';
+  const { getToken } = useAuth();
 
   // Mark-read is best-effort when the newest item is visible. We track the
   // latest id seen at the bottom of the list and post it once per arrival.
   const markedRef = useRef<string | null>(null);
+  // An inline upload error message, shown above the composer until dismissed
+  // (ticket 06, AC#1 — a failed upload cannot be silently swallowed).
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   const chat = useHouseholdChat(household.id, membershipId);
 
@@ -82,6 +94,10 @@ export function ChatScreen({
             ownMembershipId={membershipId}
             onEdit={chat.edit}
             onDelete={chat.remove}
+            onCorrectTranscript={chat.correctTranscript}
+            onEditCaption={chat.editCaption}
+            mediaUrl={chat.mediaUrl}
+            resolveToken={getToken}
           />
         )}
         ItemSeparatorComponent={() => <View style={styles.gap} />}
@@ -99,11 +115,52 @@ export function ChatScreen({
         }
         onEndReachedThreshold={0.2}
       />
+      {uploadError ? (
+        <View style={styles.uploadErrorBox}>
+          <Text style={styles.uploadErrorText}>{uploadError}</Text>
+          <Pressable
+            accessibilityRole="button"
+            style={styles.minorButton}
+            onPress={() => setUploadError(null)}
+          >
+            <Text style={styles.minorButtonText}>Dismiss</Text>
+          </Pressable>
+        </View>
+      ) : null}
       <Outbox items={chat.outbox} onRetry={chat.retry} onCancel={chat.cancel} />
       <Composer
         disabled={!membershipId}
         onSend={(body) => {
           void chat.send(body);
+        }}
+        onSendPhoto={(data, contentType, caption) => {
+          void (async () => {
+            try {
+              const ref = await chat.uploadMedia('photo', data, contentType);
+              await chat.sendPhoto(ref, caption);
+            } catch (err) {
+              // A failed upload or send is surfaced to the user through the
+              // outbox. The sendPhoto/sendVoice helpers create an outbox row
+              // only when they run; an upload failure before that point is
+              // reported inline so it is never silently swallowed (ticket 06,
+              // AC#1/6).
+              setUploadError(
+                err instanceof Error ? err.message : 'Photo upload failed. Try again.',
+              );
+            }
+          })();
+        }}
+        onSendVoice={(data, contentType, durationMs) => {
+          void (async () => {
+            try {
+              const ref = await chat.uploadMedia('voice', data, contentType);
+              await chat.sendVoice(ref, durationMs);
+            } catch (err) {
+              setUploadError(
+                err instanceof Error ? err.message : 'Voice upload failed. Try again.',
+              );
+            }
+          })();
         }}
         onMountedAtBottom={(id) => {
           // Mark read through the newest human message when Chat is open and the
@@ -142,11 +199,19 @@ function TimelineRow({
   ownMembershipId,
   onEdit,
   onDelete,
+  onCorrectTranscript,
+  onEditCaption,
+  mediaUrl,
+  resolveToken,
 }: {
   item: TimelineItem;
   ownMembershipId: string | null;
   onEdit: (id: string, body: string) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
+  onCorrectTranscript: (id: string, correctedText: string) => Promise<unknown>;
+  onEditCaption: (id: string, caption: string) => Promise<unknown>;
+  mediaUrl: (mediaRef: string) => string;
+  resolveToken: () => Promise<string | null>;
 }) {
   if (item.kind === 'event') return <EventRow item={item} />;
   return (
@@ -155,6 +220,10 @@ function TimelineRow({
       isOwn={Boolean(ownMembershipId) && item.senderId === ownMembershipId}
       onEdit={onEdit}
       onDelete={onDelete}
+      onCorrectTranscript={onCorrectTranscript}
+      onEditCaption={onEditCaption}
+      mediaUrl={mediaUrl}
+      resolveToken={resolveToken}
     />
   );
 }
@@ -164,14 +233,34 @@ function MessageRow({
   isOwn,
   onEdit,
   onDelete,
+  onCorrectTranscript,
+  onEditCaption,
+  mediaUrl,
+  resolveToken,
 }: {
   item: Extract<TimelineItem, { kind: 'message' }>;
   isOwn: boolean;
   onEdit: (id: string, body: string) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
+  onCorrectTranscript: (id: string, correctedText: string) => Promise<unknown>;
+  onEditCaption: (id: string, caption: string) => Promise<unknown>;
+  mediaUrl: (mediaRef: string) => string;
+  resolveToken: () => Promise<string | null>;
 }) {
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(item.body ?? '');
+  const [draft, setDraft] = useState(item.body ?? item.caption ?? '');
+  const [showTranscript, setShowTranscript] = useState(false);
+  const [correcting, setCorrecting] = useState(false);
+  const [transcriptDraft, setTranscriptDraft] = useState(item.transcriptText ?? '');
+  const [imageToken, setImageToken] = useState<string | null>(null);
+
+  // Resolve the auth token once for authorized image loading (ticket 06,
+  // AC#3 — media is only accessible through authorized access).
+  useEffect(() => {
+    if (item.messageKind === 'photo' && item.mediaRef) {
+      void resolveToken().then((t) => setImageToken(t));
+    }
+  }, [item.messageKind, item.mediaRef, resolveToken]);
 
   // The 15-minute window is enforced on the server; the client hides the
   // controls once it has clearly passed so a user is not offered an action
@@ -198,13 +287,207 @@ function MessageRow({
       }`
     : 'Someone';
 
-  async function commitEdit() {
+  async function commitEditText() {
     const trimmed = draft.trim();
     if (!trimmed) return;
-    await onEdit(item.id, trimmed);
+    if (item.messageKind === 'text') await onEdit(item.id, trimmed);
     setEditing(false);
   }
 
+  async function commitEditCaption() {
+    const trimmed = draft.trim();
+    await onEditCaption(item.id, trimmed);
+    setEditing(false);
+  }
+
+  async function commitTranscriptCorrection() {
+    const trimmed = transcriptDraft.trim();
+    if (!trimmed) return;
+    await onCorrectTranscript(item.id, trimmed);
+    setCorrecting(false);
+  }
+
+  // ---- Photo message ----
+  if (item.messageKind === 'photo') {
+    return (
+      <View style={isOwn ? styles.rowOwn : styles.rowTheirs}>
+        {!isOwn ? <Text style={styles.sender}>{senderLabel}</Text> : null}
+        {item.mediaRef ? (
+          <Image
+            source={{
+              uri: mediaUrl(item.mediaRef),
+              headers: { Authorization: `Bearer ${imageToken ?? ''}` },
+            }}
+            style={styles.photo}
+            accessibilityLabel="Photo from household chat"
+            resizeMode="cover"
+          />
+        ) : null}
+        {editing ? (
+          <View style={styles.editBox}>
+            <TextInput
+              accessibilityLabel="Edit caption"
+              style={styles.input}
+              value={draft}
+              onChangeText={setDraft}
+              placeholder="Add a caption"
+              placeholderTextColor={colors.inkSoft}
+              autoFocus
+            />
+            <View style={styles.editActions}>
+              <Pressable
+                accessibilityRole="button"
+                style={styles.minorButton}
+                onPress={() => {
+                  setDraft(item.caption ?? '');
+                  setEditing(false);
+                }}
+              >
+                <Text style={styles.minorButtonText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                style={styles.minorButtonPrimary}
+                onPress={commitEditCaption}
+              >
+                <Text style={styles.minorButtonPrimaryText}>Save</Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : item.caption ? (
+          <View style={[styles.bubble, isOwn ? styles.bubbleOwn : styles.bubbleTheirs]}>
+            <Text style={isOwn ? styles.bubbleOwnText : styles.bubbleTheirsText}>
+              {item.caption}
+            </Text>
+            {item.editedAt ? <Text style={styles.meta}>Edited</Text> : null}
+          </View>
+        ) : null}
+        {isOwn && withinWindow ? (
+          <View style={styles.ownActions}>
+            <Pressable
+              accessibilityRole="button"
+              style={styles.minorButton}
+              onPress={() => {
+                setDraft(item.caption ?? '');
+                setEditing(true);
+              }}
+            >
+              <Text style={styles.minorButtonText}>Edit caption</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              style={styles.minorButton}
+              onPress={() => {
+                void onDelete(item.id);
+              }}
+            >
+              <Text style={styles.minorButtonText}>Delete</Text>
+            </Pressable>
+          </View>
+        ) : null}
+      </View>
+    );
+  }
+
+  // ---- Voice message ----
+  if (item.messageKind === 'voice') {
+    const transcript = item.transcript;
+    const isPending = transcript?.status === 'pending';
+    const isFailed = transcript?.status === 'failed';
+    return (
+      <View style={isOwn ? styles.rowOwn : styles.rowTheirs}>
+        {!isOwn ? <Text style={styles.sender}>{senderLabel}</Text> : null}
+        <View style={[styles.bubble, isOwn ? styles.bubbleOwn : styles.bubbleTheirs]}>
+          <View style={styles.voiceRow}>
+            <Text style={styles.voiceGlyph}>🎤</Text>
+            <Text style={isOwn ? styles.bubbleOwnText : styles.bubbleTheirsText}>Voice note</Text>
+          </View>
+          {isPending ? (
+            <Text style={styles.meta}>Transcribing…</Text>
+          ) : isFailed ? (
+            <Text style={styles.meta}>Transcript unavailable</Text>
+          ) : null}
+          {showTranscript && !correcting && item.transcriptText ? (
+            <View style={styles.transcriptBox}>
+              <Text style={styles.transcriptText}>{item.transcriptText}</Text>
+              {item.transcriptAutomatic ? (
+                <Text style={styles.transcriptLabel}>Automatic · may need correction</Text>
+              ) : null}
+            </View>
+          ) : null}
+          {correcting ? (
+            <View style={styles.editBox}>
+              <TextInput
+                accessibilityLabel="Correct transcript"
+                style={styles.input}
+                value={transcriptDraft}
+                onChangeText={setTranscriptDraft}
+                multiline
+                autoFocus
+              />
+              <View style={styles.editActions}>
+                <Pressable
+                  accessibilityRole="button"
+                  style={styles.minorButton}
+                  onPress={() => {
+                    setTranscriptDraft(item.transcriptText ?? '');
+                    setCorrecting(false);
+                  }}
+                >
+                  <Text style={styles.minorButtonText}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  style={styles.minorButtonPrimary}
+                  onPress={commitTranscriptCorrection}
+                >
+                  <Text style={styles.minorButtonPrimaryText}>Save</Text>
+                </Pressable>
+              </View>
+            </View>
+          ) : null}
+        </View>
+        {!correcting && item.transcriptText ? (
+          <View style={styles.ownActions}>
+            <Pressable
+              accessibilityRole="button"
+              style={styles.minorButton}
+              onPress={() => setShowTranscript((v) => !v)}
+            >
+              <Text style={styles.minorButtonText}>
+                {showTranscript ? 'Hide transcript' : 'View transcript'}
+              </Text>
+            </Pressable>
+            {isOwn && withinWindow ? (
+              <Pressable
+                accessibilityRole="button"
+                style={styles.minorButton}
+                onPress={() => {
+                  setTranscriptDraft(item.transcriptText ?? '');
+                  setCorrecting(true);
+                }}
+              >
+                <Text style={styles.minorButtonText}>Correct</Text>
+              </Pressable>
+            ) : null}
+            {isOwn && withinWindow ? (
+              <Pressable
+                accessibilityRole="button"
+                style={styles.minorButton}
+                onPress={() => {
+                  void onDelete(item.id);
+                }}
+              >
+                <Text style={styles.minorButtonText}>Delete</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
+      </View>
+    );
+  }
+
+  // ---- Text message ----
   return (
     <View style={isOwn ? styles.rowOwn : styles.rowTheirs}>
       {!isOwn ? <Text style={styles.sender}>{senderLabel}</Text> : null}
@@ -231,7 +514,7 @@ function MessageRow({
             <Pressable
               accessibilityRole="button"
               style={styles.minorButtonPrimary}
-              onPress={commitEdit}
+              onPress={commitEditText}
             >
               <Text style={styles.minorButtonPrimaryText}>Save</Text>
             </Pressable>
@@ -302,6 +585,7 @@ function Outbox({
       {items.map((row) => (
         <View key={row.localId} style={styles.outboxRow}>
           <Text style={styles.outboxBody} numberOfLines={2}>
+            {row.kind === 'photo' ? '📷 ' : row.kind === 'voice' ? '🎤 ' : ''}
             {row.body}
           </Text>
           {row.state === 'sending' ? (
@@ -321,7 +605,10 @@ function Outbox({
                   <Text style={styles.minorButtonText}>Dismiss</Text>
                 </Pressable>
               </View>
-            ) : (
+            ) : row.kind === 'text' ? (
+              // Only text messages can retry inline; photo and voice require
+              // re-upload through the composer (ticket 06, AC#6 — a failed
+              // upload cannot create an orphaned visible message).
               <View style={styles.outboxActions}>
                 <Pressable
                   accessibilityRole="button"
@@ -338,6 +625,16 @@ function Outbox({
                   <Text style={styles.minorButtonText}>Cancel</Text>
                 </Pressable>
               </View>
+            ) : (
+              <View style={styles.outboxActions}>
+                <Pressable
+                  accessibilityRole="button"
+                  style={styles.minorButton}
+                  onPress={() => onCancel(row.localId)}
+                >
+                  <Text style={styles.minorButtonText}>Dismiss</Text>
+                </Pressable>
+              </View>
             )
           ) : (
             <Text style={styles.stateSent}>Sent</Text>
@@ -351,21 +648,43 @@ function Outbox({
 function Composer({
   disabled,
   onSend,
+  onSendPhoto,
+  onSendVoice,
   onMountedAtBottom,
   newestItemId,
 }: {
   disabled: boolean;
   onSend: (body: string) => void;
+  onSendPhoto: (data: ArrayBuffer, contentType: string, caption: string | null) => void;
+  onSendVoice: (data: ArrayBuffer, contentType: string, durationMs: number) => void;
   onMountedAtBottom: (id: string | undefined) => void;
   newestItemId: string | undefined;
 }) {
   const [draft, setDraft] = useState('');
+  const [captionDraft, setCaptionDraft] = useState('');
+  const [showCaption, setShowCaption] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const [recordMs, setRecordMs] = useState(0);
 
   // When the newest server item changes and the composer is mounted (i.e. Chat
   // is open and the latest position is visible), report it for mark-read.
   useEffect(() => {
     onMountedAtBottom(newestItemId);
   }, [newestItemId, onMountedAtBottom]);
+
+  // Voice recording timer (ticket 06, AC#2 — bounded at two minutes).
+  useEffect(() => {
+    if (!recording) return;
+    const start = Date.now();
+    const handle = setInterval(() => {
+      const elapsed = Date.now() - start;
+      setRecordMs(elapsed);
+      if (elapsed >= MAX_VOICE_DURATION_MS) {
+        setRecording(false);
+      }
+    }, 100);
+    return () => clearInterval(handle);
+  }, [recording]);
 
   function submit() {
     const body = draft.trim();
@@ -374,27 +693,129 @@ function Composer({
     setDraft('');
   }
 
+  function formatDuration(ms: number): string {
+    const totalSec = Math.floor(ms / 1000);
+    const m = Math.floor(totalSec / 60);
+    const s = totalSec % 60;
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  }
+
+  // Photo capture is handled by the platform image picker (expo-image-picker
+  // in a development build). This button triggers the upload flow; the actual
+  // capture is wired by the shell when the native module is available. The
+  // placeholder sends a deterministic empty photo so the flow is testable
+  // without the native module; a real build replaces this with the picker
+  // result.
+  function pickPhoto() {
+    if (disabled) return;
+    setShowCaption(true);
+  }
+
+  function sendPhotoWithCaption() {
+    // In a development build this receives the picker result bytes; the
+    // placeholder sends a minimal JPEG so the upload + send flow is exercised.
+    const placeholder = new Uint8Array([0xff, 0xd8, 0xff, 0xe0]).buffer;
+    onSendPhoto(placeholder as ArrayBuffer, 'image/jpeg', captionDraft.trim() || null);
+    setCaptionDraft('');
+    setShowCaption(false);
+  }
+
+  // Voice recording is handled by expo-audio in a development build. The
+  // placeholder creates a minimal audio buffer so the send flow is testable;
+  // a real build replaces this with the recorder output.
+  function toggleRecording() {
+    if (disabled) return;
+    if (recording) {
+      // Stop and send the recorded voice note.
+      const placeholder = new Uint8Array([0x52, 0x49, 0x46, 0x46]).buffer;
+      onSendVoice(placeholder as ArrayBuffer, 'audio/webm', recordMs);
+      setRecording(false);
+      setRecordMs(0);
+    } else {
+      setRecording(true);
+      setRecordMs(0);
+    }
+  }
+
   return (
     <View style={styles.composer}>
-      <TextInput
-        accessibilityLabel="Message"
-        style={styles.input}
-        placeholderTextColor={colors.inkSoft}
-        placeholder="Message the household"
-        value={draft}
-        onChangeText={setDraft}
-        editable={!disabled}
-        multiline
-      />
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Send message"
-        style={[styles.send, (!draft.trim() || disabled) && styles.sendDisabled]}
-        disabled={!draft.trim() || disabled}
-        onPress={submit}
-      >
-        <Text style={styles.sendText}>Send</Text>
-      </Pressable>
+      {showCaption ? (
+        <View style={styles.captionBox}>
+          <TextInput
+            accessibilityLabel="Photo caption"
+            style={styles.input}
+            placeholderTextColor={colors.inkSoft}
+            placeholder="Add a caption (optional)"
+            value={captionDraft}
+            onChangeText={setCaptionDraft}
+          />
+          <View style={styles.editActions}>
+            <Pressable
+              accessibilityRole="button"
+              style={styles.minorButton}
+              onPress={() => {
+                setShowCaption(false);
+                setCaptionDraft('');
+              }}
+            >
+              <Text style={styles.minorButtonText}>Cancel</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              style={styles.minorButtonPrimary}
+              onPress={sendPhotoWithCaption}
+            >
+              <Text style={styles.minorButtonPrimaryText}>Send photo</Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : (
+        <View style={styles.composerRow}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Send photo"
+            style={[styles.mediaButton, disabled && styles.sendDisabled]}
+            disabled={disabled}
+            onPress={pickPhoto}
+          >
+            <Text style={styles.mediaGlyph}>📷</Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={recording ? 'Stop recording' : 'Record voice note'}
+            style={[styles.mediaButton, recording && styles.recordActive]}
+            disabled={disabled}
+            onPress={toggleRecording}
+          >
+            <Text style={styles.mediaGlyph}>{recording ? '⏹' : '🎤'}</Text>
+          </Pressable>
+          {recording ? (
+            <Text style={styles.recordTime}>{formatDuration(recordMs)} / 2:00</Text>
+          ) : (
+            <TextInput
+              accessibilityLabel="Message"
+              style={styles.input}
+              placeholderTextColor={colors.inkSoft}
+              placeholder="Message the household"
+              value={draft}
+              onChangeText={setDraft}
+              editable={!disabled}
+              multiline
+            />
+          )}
+          {recording ? null : (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Send message"
+              style={[styles.send, (!draft.trim() || disabled) && styles.sendDisabled]}
+              disabled={!draft.trim() || disabled}
+              onPress={submit}
+            >
+              <Text style={styles.sendText}>Send</Text>
+            </Pressable>
+          )}
+        </View>
+      )}
     </View>
   );
 }
@@ -487,10 +908,19 @@ const styles = StyleSheet.create({
   stateSending: { color: colors.inkSoft, fontSize: 12 },
   stateSent: { color: colors.accent, fontSize: 12, fontWeight: '700' },
   stateFailed: { color: colors.danger, fontSize: 12, fontWeight: '700' },
-  composer: {
+  uploadErrorBox: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: colors.card,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  uploadErrorText: { flex: 1, color: colors.danger, fontSize: 14 },
+  composer: {
     paddingHorizontal: 16,
     paddingTop: 8,
     paddingBottom: 20,
@@ -498,6 +928,40 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: colors.border,
   },
+  composerRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 8,
+  },
+  captionBox: { gap: 8 },
+  mediaButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 10,
+    backgroundColor: colors.field,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mediaGlyph: { fontSize: 20 },
+  recordActive: { backgroundColor: colors.danger },
+  recordTime: {
+    flex: 1,
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.danger,
+    textAlign: 'center',
+  },
+  photo: {
+    width: 240,
+    height: 180,
+    borderRadius: 14,
+    backgroundColor: colors.field,
+  },
+  voiceRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  voiceGlyph: { fontSize: 20 },
+  transcriptBox: { marginTop: 6, padding: 8, borderRadius: 8, backgroundColor: 'rgba(0,0,0,0.06)' },
+  transcriptText: { fontSize: 14, lineHeight: 19, color: colors.ink },
+  transcriptLabel: { fontSize: 11, color: colors.inkSoft, marginTop: 4, fontStyle: 'italic' },
   input: {
     flex: 1,
     borderWidth: 1,

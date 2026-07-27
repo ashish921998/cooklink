@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Authorization, AuthorizationDeniedError, InMemoryRepository, id } from '../index.js';
+import { isMediaAccessible } from '../chat-media.js';
 
 /**
  * The mandatory backend authorization isolation suite (issue 06 AC#22,
@@ -203,6 +204,57 @@ test('media/transcripts are tied to household messages and do not leak', async (
   // transcript retrieval is keyed by message id, which lives only in B
   const t = await repo.getTranscript(msg.id);
   assert.equal(t!.transcript, 'नारियल चाहिए');
+});
+
+test('isMediaAccessible denies a cross-household mediaRef (ticket 06, AC#8)', async () => {
+  const { repo, ha, hb } = await twoHouseholds();
+  const ownerB = (await repo.listMembers(hb.household.id))[0]!;
+  const msg = await repo.createMessage(hb.household.id, {
+    senderId: ownerB.id,
+    kind: 'photo',
+    body: null,
+    caption: 'private photo',
+    mediaRef: 'r2://hb/photo1',
+    clientCreatedAt: new Date().toISOString(),
+  });
+  // The media belongs to household B; a membership from A must not access it.
+  assert.equal(isMediaAccessible(msg, ha.household.id as string), false);
+  assert.equal(isMediaAccessible(msg, hb.household.id as string), true);
+  // After deletion the mediaRef is cleared and access is revoked.
+  const deleted = await repo.deleteMessage(hb.household.id, msg.id, ownerB.id);
+  assert.equal(isMediaAccessible(deleted, hb.household.id as string), false);
+});
+
+test('a voice transcript is never returned for another household (ticket 06, AC#8)', async () => {
+  const { repo, ha, hb } = await twoHouseholds();
+  const ownerB = (await repo.listMembers(hb.household.id))[0]!;
+  const msg = await repo.createMessage(hb.household.id, {
+    senderId: ownerB.id,
+    kind: 'voice',
+    body: null,
+    caption: null,
+    mediaRef: 'r2://hb/voice1',
+    clientCreatedAt: new Date().toISOString(),
+  });
+  await repo.setTranscript(msg.id, {
+    messageId: msg.id,
+    language: 'hi',
+    transcript: 'गुप्त संदेश',
+    status: 'ready',
+    correctedTranscript: null,
+  });
+  // A's timeline is empty — no transcript from B ever appears.
+  const aTimeline = await repo.getChatTimeline(ha.household.id, null, 50);
+  assert.equal(aTimeline.length, 0);
+  // B's timeline includes the voice message with its transcript.
+  const bTimeline = await repo.getChatTimeline(hb.household.id, null, 50);
+  assert.equal(bTimeline.length, 1);
+  const item = bTimeline[0]!;
+  assert.equal(item.kind, 'message');
+  if (item.kind === 'message') {
+    assert.ok(item.transcript);
+    assert.equal(item.transcript!.transcript, 'गुप्त संदेश');
+  }
 });
 
 test('edit/delete of a message is scoped to sender + household', async () => {

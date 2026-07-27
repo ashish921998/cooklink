@@ -6,10 +6,15 @@ import { logger } from 'hono/logger';
 import {
   Authorization,
   AuthorizationDeniedError,
+  canCorrectTranscript,
   canEditOrDeleteMessage,
   decideMealEdit,
+  detectMessageIntent,
+  effectiveTranscript,
   generateStarterPlan,
   id,
+  isAutomaticTranscript,
+  MAX_VOICE_DURATION_MS,
   mealChangedPayload,
   mealPlanBulkPayload,
   planRegeneration,
@@ -17,6 +22,7 @@ import {
   renderEvent,
   swapMealIdentities,
   todayISO,
+  validateMessageShape,
   type Language,
   type MealPatch,
   type PlannedMeal,
@@ -32,6 +38,7 @@ import {
   recipes,
   systemEvents,
   users,
+  voiceTranscripts,
 } from '@cooklink/db';
 import type { Database } from '@cooklink/db';
 import { authMiddleware, type AuthEnv } from './auth.js';
@@ -45,12 +52,21 @@ import {
   type InviteRecord,
 } from './invite-lifecycle.js';
 import { validateMembershipRemoval } from './membership-lifecycle.js';
+import { createMediaStore, type MediaKind, type MediaStore } from './media.js';
+import { createTranscriptionService, type TranscriptionService } from './transcription.js';
 
 type HouseholdRoleInvite = 'member' | 'cook';
 
-export function createApp(db: Database) {
+export interface AppServices {
+  media?: MediaStore;
+  transcription?: TranscriptionService;
+}
+
+export function createApp(db: Database, services?: AppServices) {
   const app = new Hono<AuthEnv>();
   const authorization = new Authorization(new DrizzleAuthorizationLookup(db));
+  const media = services?.media ?? createMediaStore();
+  const transcription = services?.transcription ?? createTranscriptionService();
 
   app.use('*', logger());
   app.use(
@@ -924,6 +940,17 @@ export function createApp(db: Database) {
       .from(systemEvents)
       .where(eq(systemEvents.householdId, principal.householdId))
       .orderBy(asc(systemEvents.createdAt), asc(systemEvents.id));
+    // Voice transcripts are private to the Household and travel with their
+    // message (ticket 06 — transcripts never cross Household boundaries).
+    const messageIds = messageRows.map((m) => m.id);
+    const transcriptRows =
+      messageIds.length > 0
+        ? await db
+            .select()
+            .from(voiceTranscripts)
+            .where(inArray(voiceTranscripts.messageId, messageIds))
+        : [];
+    const transcriptByMessage = new Map(transcriptRows.map((r) => [r.messageId, r]));
 
     type Row = {
       kind: 'message' | 'event';
@@ -984,7 +1011,11 @@ export function createApp(db: Database) {
     return c.json({
       items: page.map((r) =>
         r.kind === 'message'
-          ? serializeChatMessage(r.payload as (typeof messageRows)[number], names)
+          ? serializeChatMessage(
+              r.payload as (typeof messageRows)[number],
+              names,
+              transcriptByMessage.get((r.payload as (typeof messageRows)[number]).id) ?? null,
+            )
           : serializeChatEvent(
               r.payload as (typeof eventRows)[number],
               names,
@@ -995,12 +1026,16 @@ export function createApp(db: Database) {
   });
 
   /**
-   * Send a human message (issue 04 — text only in this ticket; photo and voice
-   * arrive in ticket 06). The server accepts the message only after
-   * re-authorizing the membership, so a just-removed participant's queued
-   * attempt fails with Household-access-changed (issue 06, AC#19). Server
-   * acceptance time fixes the message's position in the shared timeline; the
-   * client time is retained for diagnostics.
+   * Send a human message (ticket 06 — text, photo, and voice). The server
+   * accepts the message only after re-authorizing the membership, so a
+   * just-removed participant's queued attempt fails with
+   * Household-access-changed (issue 06, AC#19). Server acceptance time fixes
+   * the message's position in the shared timeline; the client time is retained
+   * for diagnostics.
+   *
+   * Photo and voice messages reference a mediaRef obtained from the media
+   * upload route; the media belongs to this Household. A voice message
+   * triggers server-side transcription (ticket 06, AC#4).
    */
   app.post('/v1/households/:householdId/chat/messages', async (c) => {
     const user = c.get('authUser');
@@ -1010,20 +1045,45 @@ export function createApp(db: Database) {
       id<'HouseholdId'>(householdId),
       'send_message',
     );
-    const body: { body?: string | null; clientCreatedAt?: string } = await c.req
-      .json()
-      .catch(() => ({}));
-    const trimmed = (body.body ?? '').trim();
-    if (!trimmed) return c.json({ error: 'body_required' }, 400);
+    const body: {
+      kind?: 'text' | 'photo' | 'voice';
+      body?: string | null;
+      caption?: string | null;
+      mediaRef?: string | null;
+      durationMs?: number;
+      clientCreatedAt?: string;
+    } = await c.req.json().catch(() => ({}));
+    const kind = body.kind ?? 'text';
+    const shape = validateMessageShape({
+      kind,
+      body: body.body ?? null,
+      caption: body.caption ?? null,
+      mediaRef: body.mediaRef ?? null,
+    });
+    if (!shape.ok) return c.json({ error: shape.reason }, 400);
+
+    // A voice note is bounded at two minutes (ticket 06, AC#2). The duration
+    // is required for voice messages so the bound cannot be bypassed by
+    // omitting the field.
+    if (kind === 'voice') {
+      const durationMs = body.durationMs;
+      if (durationMs == null || !Number.isFinite(durationMs) || durationMs <= 0) {
+        return c.json({ error: 'voice_duration_required' }, 400);
+      }
+      if (durationMs > MAX_VOICE_DURATION_MS) {
+        return c.json({ error: 'voice_too_long' }, 400);
+      }
+    }
+
     const messageId = randomUUID();
     await db.insert(chatMessages).values({
       id: messageId,
       householdId: principal.householdId,
       senderId: principal.membershipId,
-      kind: 'text',
-      body: trimmed,
-      caption: null,
-      mediaRef: null,
+      kind,
+      body: kind === 'text' ? (body.body ?? '').trim() : null,
+      caption: kind === 'photo' ? (body.caption ?? '').trim() || null : null,
+      mediaRef: kind !== 'text' ? (body.mediaRef ?? null) : null,
       clientCreatedAt: new Date(body.clientCreatedAt ?? Date.now()),
     });
     const [created] = await db
@@ -1032,9 +1092,68 @@ export function createApp(db: Database) {
       .where(eq(chatMessages.id, messageId))
       .limit(1);
     const names = await resolveMembershipLabels(db, principal.householdId, [created!.senderId]);
+
+    // A voice message starts transcription in `pending` state. The response
+    // returns immediately with the pending transcript so the client can show
+    // "Transcribing…"; the actual transcription runs asynchronously and the
+    // client observes the result via the next poll (ticket 06, AC#4).
+    // Transcription runs server-side; no provider key is in the mobile bundle.
+    let transcriptRow: typeof voiceTranscripts.$inferSelect | null = null;
+    if (kind === 'voice' && created!.mediaRef) {
+      const resolved = await media.resolve(created!.mediaRef, principal.householdId);
+      if (resolved) {
+        await db
+          .insert(voiceTranscripts)
+          .values({ messageId, language: null, transcript: null, status: 'pending' })
+          .onDuplicateKeyUpdate({ set: { status: 'pending' } });
+        const [pendingRow] = await db
+          .select()
+          .from(voiceTranscripts)
+          .where(eq(voiceTranscripts.messageId, messageId))
+          .limit(1);
+        transcriptRow = pendingRow ?? null;
+
+        // Run transcription without blocking the send response. The result is
+        // written back to the transcript row when the provider returns; the
+        // client picks it up on the next poll.
+        const householdIdForTranscribe = principal.householdId;
+        void transcription
+          .transcribe({ data: resolved.data, contentType: resolved.contentType })
+          .then((result) =>
+            db
+              .insert(voiceTranscripts)
+              .values({
+                messageId,
+                language: result.language,
+                transcript: result.transcript,
+                status: result.status,
+              })
+              .onDuplicateKeyUpdate({
+                set: {
+                  language: result.language,
+                  transcript: result.transcript,
+                  status: result.status,
+                },
+              }),
+          )
+          .catch(() =>
+            db
+              .insert(voiceTranscripts)
+              .values({ messageId, language: null, transcript: null, status: 'failed' })
+              .onDuplicateKeyUpdate({ set: { status: 'failed' } }),
+          )
+          .catch(() => {
+            // A failure to persist the transcription failure is logged but
+            // never surfaces to the sender; the transcript stays pending and
+            // the client retries on the next poll.
+          });
+        void householdIdForTranscribe;
+      }
+    }
+
     return c.json(
       {
-        item: serializeChatMessage(created!, names),
+        item: serializeChatMessage(created!, names, transcriptRow),
         membershipId: principal.membershipId,
       },
       201,
@@ -1043,8 +1162,14 @@ export function createApp(db: Database) {
 
   /**
    * Edit your own human message within the 15-minute window (issue 06, AC#11).
-   * A confirmed structured action is never mutated by editing its source
-   * message. System events are not human messages and have no edit route.
+   * A text message body or a photo caption may be edited; a voice note's text
+   * is corrected through the transcript route. A confirmed structured action
+   * is never mutated by editing its source message. System events are not
+   * human messages and have no edit route.
+   *
+   * Editing a photo caption re-runs intent detection against the new caption
+   * (ticket 06, AC#5 — correcting a transcript or photo caption re-runs any
+   * derived intent detection without rewriting the original media).
    */
   app.patch('/v1/households/:householdId/chat/messages/:messageId', async (c) => {
     const user = c.get('authUser');
@@ -1084,6 +1209,10 @@ export function createApp(db: Database) {
       if (!trimmed) return c.json({ error: 'body_required' }, 400);
       patch.body = trimmed;
     }
+    if (message.kind === 'photo' && patch.caption !== undefined) {
+      const trimmed = patch.caption?.trim() ?? '';
+      patch.caption = trimmed || null;
+    }
     await db
       .update(chatMessages)
       .set({ ...patch, editedAt: new Date() })
@@ -1100,13 +1229,35 @@ export function createApp(db: Database) {
       .where(eq(chatMessages.id, messageId))
       .limit(1);
     const names = await resolveMembershipLabels(db, principal.householdId, [updated!.senderId]);
-    return c.json({ item: serializeChatMessage(updated!, names) });
+
+    // Re-run intent detection against the edited text/caption so a corrected
+    // caption can produce a fresh private suggestion (ticket 06, AC#5). The
+    // original media is never rewritten.
+    const [transcriptRow] = await db
+      .select()
+      .from(voiceTranscripts)
+      .where(eq(voiceTranscripts.messageId, messageId))
+      .limit(1);
+    const intent = detectMessageIntent(
+      {
+        kind: updated!.kind,
+        body: updated!.body,
+        caption: updated!.caption,
+      },
+      transcriptRow ? toDomainTranscript(transcriptRow) : null,
+    );
+
+    return c.json({
+      item: serializeChatMessage(updated!, names, transcriptRow ?? null),
+      intent,
+    });
   });
 
   /**
    * Delete your own human message within the 15-minute window (issue 06,
    * AC#11). A deletion leaves a "Message deleted" tombstone in the timeline;
-   * media access is revoked (the media-ref is cleared). The tombstone remains
+   * media access is revoked (the media-ref is cleared and the private object
+   * is scheduled for deletion from the media store). The tombstone remains
    * so the shared timeline stays coherent.
    */
   app.delete('/v1/households/:householdId/chat/messages/:messageId', async (c) => {
@@ -1139,6 +1290,12 @@ export function createApp(db: Database) {
       return c.json({ error: decision.reason }, decision.reason === 'not_author' ? 403 : 409);
     }
 
+    // Revoke media access immediately and schedule the private object for
+    // deletion (issue 06 — deleting a photo or voice note revokes access to
+    // its media immediately).
+    if (message.mediaRef) {
+      await media.delete(message.mediaRef);
+    }
     await db
       .update(chatMessages)
       .set({ deletedAt: new Date(), mediaRef: null })
@@ -1155,7 +1312,155 @@ export function createApp(db: Database) {
       .where(eq(chatMessages.id, messageId))
       .limit(1);
     const names = await resolveMembershipLabels(db, principal.householdId, [updated!.senderId]);
-    return c.json({ item: serializeChatMessage(updated!, names) });
+    const [transcriptRow] = await db
+      .select()
+      .from(voiceTranscripts)
+      .where(eq(voiceTranscripts.messageId, messageId))
+      .limit(1);
+    return c.json({ item: serializeChatMessage(updated!, names, transcriptRow ?? null) });
+  });
+
+  /**
+   * Upload a private photo or voice note (ticket 06, AC#1/2). The media is
+   * stored behind an opaque `mediaRef` tagged with this Household; it is never
+   * a public permanent URL. The caller then references this `mediaRef` when
+   * sending a photo or voice message. Authorization is re-checked on every
+   * subsequent media read (issue 06, AC#3).
+   *
+   * The request body is the raw media bytes with a `Content-Type` header; the
+   * `kind` query parameter selects photo or voice. A voice note's duration in
+   * milliseconds is optional here and enforced on send.
+   */
+  app.post('/v1/households/:householdId/chat/media', async (c) => {
+    const user = c.get('authUser');
+    const householdId = c.req.param('householdId');
+    const principal = await authorization.authorizeCapability(
+      id<'UserId'>(user.id),
+      id<'HouseholdId'>(householdId),
+      'send_message',
+    );
+    const kind = c.req.query('kind') as MediaKind | undefined;
+    if (kind !== 'photo' && kind !== 'voice') {
+      return c.json({ error: 'kind_required' }, 400);
+    }
+    const contentType = c.req.header('content-type') ?? 'application/octet-stream';
+    const data = Buffer.from(await c.req.arrayBuffer());
+    if (data.byteLength === 0) return c.json({ error: 'empty_media' }, 400);
+    const stored = await media.put({
+      householdId: principal.householdId,
+      kind,
+      contentType,
+      data,
+    });
+    return c.json({ mediaRef: stored.mediaRef, kind: stored.kind, bytes: stored.bytes }, 201);
+  });
+
+  /**
+   * Authorized media access (ticket 06, AC#3 — private media is accessible
+   * only through short-lived authorized access and never through a public
+   * permanent URL). The server re-authorizes the membership and verifies the
+   * media belongs to this Household on every request, then proxies the bytes.
+   * A cross-Household mediaRef resolves to nothing (issue 06, AC#8).
+   */
+  app.get('/v1/households/:householdId/chat/media/:mediaRef', async (c) => {
+    const user = c.get('authUser');
+    const householdId = c.req.param('householdId');
+    const principal = await authorization.authorize(
+      id<'UserId'>(user.id),
+      id<'HouseholdId'>(householdId),
+    );
+    const mediaRef = c.req.param('mediaRef');
+    // The mediaRef may be URL-encoded when it contains slashes.
+    const decoded = decodeURIComponent(mediaRef);
+    const resolved = await media.resolve(decoded, principal.householdId);
+    if (!resolved) return c.json({ error: 'not_found' }, 404);
+    return new Response(resolved.data, {
+      headers: {
+        'content-type': resolved.contentType,
+        'cache-control': 'private, no-store, max-age=0',
+      },
+    });
+  });
+
+  /**
+   * Correct a voice transcript within the 15-minute edit window (ticket 06,
+   * AC#4 — uncertain output is labelled and correctable; AC#5 — correcting a
+   * transcript re-runs intent detection without rewriting the original media).
+   * The original automatic transcript is preserved; the correction is stored
+   * in `correctedTranscript`. Only the author may correct, and only for a
+   * voice note.
+   */
+  app.patch('/v1/households/:householdId/chat/messages/:messageId/transcript', async (c) => {
+    const user = c.get('authUser');
+    const householdId = c.req.param('householdId');
+    const principal = await authorization.authorizeCapability(
+      id<'UserId'>(user.id),
+      id<'HouseholdId'>(householdId),
+      'edit_delete_own_message',
+    );
+    const messageId = c.req.param('messageId');
+    const [message] = await db
+      .select()
+      .from(chatMessages)
+      .where(eq(chatMessages.id, messageId))
+      .limit(1);
+    if (!message || message.householdId !== principal.householdId)
+      return c.json({ error: 'not_found' }, 404);
+
+    const body: { correctedTranscript?: string } = await c.req.json().catch(() => ({}));
+    const corrected = body.correctedTranscript ?? '';
+    const decision = canCorrectTranscript({
+      actorId: principal.membershipId,
+      message: {
+        kind: message.kind,
+        senderId: id<'MembershipId'>(message.senderId),
+        serverCreatedAt: message.serverCreatedAt.toISOString(),
+        deletedAt: message.deletedAt ? message.deletedAt.toISOString() : null,
+      },
+      correctedText: corrected,
+      now: new Date(),
+    });
+    if (!decision.ok) {
+      const status =
+        decision.reason === 'not_author' ? 403 : decision.reason === 'not_voice' ? 400 : 409;
+      return c.json({ error: decision.reason }, status);
+    }
+
+    // Preserve the original automatic transcript; store the correction
+    // separately so the UI can label it (ticket 06, AC#4).
+    const [existing] = await db
+      .select()
+      .from(voiceTranscripts)
+      .where(eq(voiceTranscripts.messageId, messageId))
+      .limit(1);
+    const trimmed = corrected.trim();
+    if (existing) {
+      await db
+        .update(voiceTranscripts)
+        .set({ correctedTranscript: trimmed })
+        .where(eq(voiceTranscripts.messageId, messageId));
+    } else {
+      await db.insert(voiceTranscripts).values({
+        messageId,
+        language: null,
+        transcript: null,
+        status: 'ready',
+        correctedTranscript: trimmed,
+      });
+    }
+    const [updated] = await db
+      .select()
+      .from(voiceTranscripts)
+      .where(eq(voiceTranscripts.messageId, messageId))
+      .limit(1);
+    const domainTranscript = toDomainTranscript(updated!);
+    // Re-run intent detection against the corrected transcript (ticket 06,
+    // AC#5). The original media is never rewritten.
+    const intent = detectMessageIntent(
+      { kind: message.kind, body: message.body, caption: message.caption },
+      domainTranscript,
+    );
+    return c.json({ transcript: serializeTranscript(updated!), intent });
   });
 
   /**
@@ -1437,8 +1742,10 @@ async function resolveMembershipLabels(
 function serializeChatMessage(
   row: ChatMessageRow,
   labels: Map<string, { displayName: string; role: string; active: boolean }>,
+  transcriptRow: typeof voiceTranscripts.$inferSelect | null,
 ) {
   const sender = labels.get(row.senderId);
+  const domainTranscript = transcriptRow ? toDomainTranscript(transcriptRow) : null;
   return {
     kind: 'message' as const,
     id: row.id,
@@ -1451,10 +1758,36 @@ function serializeChatMessage(
     body: row.deletedAt ? null : row.body,
     caption: row.deletedAt ? null : row.caption,
     mediaRef: row.deletedAt ? null : row.mediaRef,
+    transcript: serializeTranscript(transcriptRow),
+    transcriptText: row.deletedAt ? null : effectiveTranscript(domainTranscript),
+    transcriptAutomatic: row.deletedAt ? false : isAutomaticTranscript(domainTranscript),
     deletedAt: row.deletedAt ? row.deletedAt.toISOString() : null,
     editedAt: row.editedAt ? row.editedAt.toISOString() : null,
     clientCreatedAt: row.clientCreatedAt.toISOString(),
     serverCreatedAt: row.serverCreatedAt.toISOString(),
+  };
+}
+
+/** Map a Drizzle voice-transcript row onto the domain {@link VoiceTranscript}. */
+function toDomainTranscript(row: typeof voiceTranscripts.$inferSelect) {
+  return {
+    messageId: id<'ChatMessageId'>(row.messageId),
+    language: row.language,
+    transcript: row.transcript,
+    status: row.status,
+    correctedTranscript: row.correctedTranscript,
+  };
+}
+
+/** Serialize a transcript row for the API (null when there is no transcript). */
+function serializeTranscript(row: typeof voiceTranscripts.$inferSelect | null) {
+  if (!row) return null;
+  return {
+    messageId: row.messageId,
+    language: row.language,
+    transcript: row.transcript,
+    status: row.status,
+    correctedTranscript: row.correctedTranscript,
   };
 }
 

@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useAuth } from '@clerk/clerk-expo';
 import { useApi } from './api';
 
+const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
+
 /**
- * Household text Chat client (issue 04 — text chat).
+ * Household Chat client (issue 04 — text chat; ticket 06 — photo and voice).
  *
  * Contract this implements:
  * - The timeline is server-ordered, oldest first, and merges human messages
@@ -14,6 +17,9 @@ import { useApi } from './api';
  *   and cannot become visible or actionable to others before server acceptance
  *   (issue 06, AC#12). A pending item is local-only until the server accepts
  *   it; it is never rendered inside the shared timeline.
+ * - Photo and voice media are uploaded to a private, authorized endpoint and
+ *   referenced by an opaque mediaRef; media is never a public permanent URL
+ *   (ticket 06, AC#3).
  */
 
 export type ChatMessageKind = 'text' | 'photo' | 'voice';
@@ -43,11 +49,16 @@ export interface ChatMessageItem {
   body: string | null;
   caption: string | null;
   mediaRef: string | null;
+  /** The voice transcript (null for text/photo). */
+  transcript: ChatTranscript | null;
+  /** The effective transcript text (corrected if present, else automatic). */
+  transcriptText: string | null;
+  /** Whether the transcript is still the automatic, uncorrected one. */
+  transcriptAutomatic: boolean;
   deletedAt: string | null;
   editedAt: string | null;
   clientCreatedAt: string;
   serverCreatedAt: string;
-  transcript: ChatTranscript | null;
 }
 
 /** An attributed, immutable system event rendered in the viewer's language. */
@@ -78,7 +89,10 @@ export interface AccessProbe {
 export interface OutboxItem {
   localId: string;
   householdId: string;
+  /** The display label for the outbox row (text body, "Photo", or "Voice note"). */
   body: string;
+  /** The message kind this outbox row represents. */
+  kind: ChatMessageKind;
   clientCreatedAt: string;
   state: 'sending' | 'sent' | 'failed';
   /**
@@ -100,6 +114,25 @@ interface SendResponse {
   item: ChatMessageItem;
 }
 
+interface MediaUploadResponse {
+  mediaRef: string;
+  kind: ChatMessageKind;
+  bytes: number;
+}
+
+interface TranscriptCorrectResponse {
+  transcript: ChatTranscript;
+  intent: { kind: string; item?: string; quantity?: string | null };
+}
+
+interface CaptionEditResponse {
+  item: ChatMessageItem;
+  intent: { kind: string; item?: string; quantity?: string | null };
+}
+
+/** The maximum voice note duration (ticket 06, AC#2 — two minutes). */
+export const MAX_VOICE_DURATION_MS = 2 * 60 * 1000;
+
 const POLL_INTERVAL_MS = 8_000;
 
 /**
@@ -119,11 +152,16 @@ export const EDIT_WINDOW_MS = 15 * 60 * 1000;
  */
 export function useHouseholdChat(householdId: string, ownMembershipId: string | null) {
   const api = useApi();
+  const { getToken } = useAuth();
   const [items, setItems] = useState<TimelineItem[]>([]);
   const [outbox, setOutbox] = useState<OutboxItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const newestIdRef = useRef<string | null>(null);
+  // Stable refs for the media upload fetch (which sends raw bytes, not JSON).
+  const useAuthRef = useRef({ getToken });
+  useAuthRef.current = { getToken };
+  const apiUrlRef = useRef(API_URL);
 
   const sortByTime = useCallback((rows: TimelineItem[]): TimelineItem[] => {
     const timeOf = (t: TimelineItem) => (t.kind === 'message' ? t.serverCreatedAt : t.createdAt);
@@ -208,6 +246,7 @@ export function useHouseholdChat(householdId: string, ownMembershipId: string | 
         localId,
         householdId,
         body: trimmed,
+        kind: 'text',
         clientCreatedAt,
         state: 'sending',
         failureReason: null,
@@ -248,12 +287,205 @@ export function useHouseholdChat(householdId: string, ownMembershipId: string | 
     [absorb, api, householdId, ownMembershipId],
   );
 
+  /**
+   * Upload a private photo or voice note and return the opaque mediaRef. The
+   * media is never a public permanent URL; it is read back only through the
+   * authorized media endpoint (ticket 06, AC#3). Upload progress and retry
+   * state are owned by the caller (the Composer); a failed upload cannot
+   * create an orphaned visible message because no message is sent until the
+   * upload succeeds and the send is accepted (ticket 06, AC#6).
+   */
+  const uploadMedia = useCallback(
+    async (
+      kind: 'photo' | 'voice',
+      data: ArrayBuffer | Uint8Array,
+      contentType: string,
+    ): Promise<string> => {
+      const { getToken } = useAuthRef.current;
+      const token = await getToken();
+      const res = await fetch(
+        `${apiUrlRef.current}/v1/households/${householdId}/chat/media?kind=${kind}`,
+        {
+          method: 'POST',
+          headers: {
+            'content-type': contentType,
+            ...(token ? { authorization: `Bearer ${token}` } : {}),
+          },
+          body: data as BodyInit,
+        },
+      );
+      if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
+      const result = (await res.json()) as MediaUploadResponse;
+      return result.mediaRef;
+    },
+    [householdId],
+  );
+
+  /**
+   * Send a photo message with an optional caption. The mediaRef must have been
+   * obtained from {@link uploadMedia}. A failed send stays in the outbox and
+   * never enters the shared timeline (ticket 06, AC#6).
+   */
+  const sendPhoto = useCallback(
+    async (mediaRef: string, caption: string | null) => {
+      if (!ownMembershipId) return;
+      const localId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const clientCreatedAt = new Date().toISOString();
+      const pending: OutboxItem = {
+        localId,
+        householdId,
+        body: caption ?? 'Photo',
+        kind: 'photo',
+        clientCreatedAt,
+        state: 'sending',
+        failureReason: null,
+      };
+      setOutbox((prev) => [...prev, pending]);
+      try {
+        const result = await api<SendResponse>(`/v1/households/${householdId}/chat/messages`, {
+          method: 'POST',
+          body: JSON.stringify({ kind: 'photo', mediaRef, caption, clientCreatedAt }),
+        });
+        absorb([result.item]);
+        setOutbox((prev) =>
+          prev.map((row) =>
+            row.localId === localId ? { ...row, state: 'sent', serverId: result.item.id } : row,
+          ),
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : '';
+        const accessChanged = /\b(40[34])\b/.test(message);
+        setOutbox((prev) =>
+          prev.map((row) =>
+            row.localId === localId
+              ? {
+                  ...row,
+                  state: 'failed',
+                  failureReason: accessChanged ? 'household_access_changed' : null,
+                }
+              : row,
+          ),
+        );
+      }
+    },
+    [absorb, api, householdId, ownMembershipId],
+  );
+
+  /**
+   * Send a voice note. The mediaRef must have been obtained from
+   * {@link uploadMedia}. The duration is bounded at two minutes (ticket 06,
+   * AC#2); the server enforces the bound, and the client disables recording
+   * past the limit.
+   */
+  const sendVoice = useCallback(
+    async (mediaRef: string, durationMs: number) => {
+      if (!ownMembershipId) return;
+      const localId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const clientCreatedAt = new Date().toISOString();
+      const pending: OutboxItem = {
+        localId,
+        householdId,
+        body: 'Voice note',
+        kind: 'voice',
+        clientCreatedAt,
+        state: 'sending',
+        failureReason: null,
+      };
+      setOutbox((prev) => [...prev, pending]);
+      try {
+        const result = await api<SendResponse>(`/v1/households/${householdId}/chat/messages`, {
+          method: 'POST',
+          body: JSON.stringify({ kind: 'voice', mediaRef, durationMs, clientCreatedAt }),
+        });
+        absorb([result.item]);
+        setOutbox((prev) =>
+          prev.map((row) =>
+            row.localId === localId ? { ...row, state: 'sent', serverId: result.item.id } : row,
+          ),
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : '';
+        const accessChanged = /\b(40[34])\b/.test(message);
+        setOutbox((prev) =>
+          prev.map((row) =>
+            row.localId === localId
+              ? {
+                  ...row,
+                  state: 'failed',
+                  failureReason: accessChanged ? 'household_access_changed' : null,
+                }
+              : row,
+          ),
+        );
+      }
+    },
+    [absorb, api, householdId, ownMembershipId],
+  );
+
+  /**
+   * Build the authorized media URL for a mediaRef. The URL goes through the
+   * server's authorized endpoint, which re-checks the membership on every
+   * request (ticket 06, AC#3). The token is attached by the caller at fetch
+   * time.
+   */
+  const mediaUrl = useCallback(
+    (mediaRef: string) =>
+      `${apiUrlRef.current}/v1/households/${householdId}/chat/media/${encodeURIComponent(mediaRef)}`,
+    [householdId],
+  );
+
+  /**
+   * Correct a voice transcript within the 15-minute edit window (ticket 06,
+   * AC#4 — uncertain output is labelled and correctable). The correction
+   * re-runs intent detection server-side (AC#5).
+   */
+  const correctTranscript = useCallback(
+    async (messageId: string, correctedText: string) => {
+      const res = await api<TranscriptCorrectResponse>(
+        `/v1/households/${householdId}/chat/messages/${messageId}/transcript`,
+        { method: 'PATCH', body: JSON.stringify({ correctedTranscript: correctedText }) },
+      );
+      setItems((prev) =>
+        prev.map((t) =>
+          t.id === messageId && t.kind === 'message'
+            ? {
+                ...t,
+                transcript: res.transcript,
+                transcriptText: res.transcript.correctedTranscript ?? t.transcriptText,
+                transcriptAutomatic: false,
+              }
+            : t,
+        ),
+      );
+      return res;
+    },
+    [api, householdId],
+  );
+
+  /**
+   * Edit a photo caption within the 15-minute edit window (ticket 06, AC#5 —
+   * editing a caption re-runs intent detection). Returns the re-detected
+   * intent so the UI can surface a fresh private suggestion.
+   */
+  const editCaption = useCallback(
+    async (messageId: string, caption: string) => {
+      const res = await api<CaptionEditResponse>(
+        `/v1/households/${householdId}/chat/messages/${messageId}`,
+        { method: 'PATCH', body: JSON.stringify({ caption }) },
+      );
+      setItems((prev) => prev.map((t) => (t.id === messageId ? res.item : t)));
+      return res;
+    },
+    [api, householdId],
+  );
+
   const retry = useCallback(
     (localId: string) => {
       const row = outbox.find((r) => r.localId === localId);
       if (!row) return;
-      void send(row.body);
-      // Drop the failed row; the retry enqueues a fresh sending row.
+      if (row.kind === 'text') void send(row.body);
+      // Photo and voice retries require re-upload; the caller cancels and
+      // re-sends through the composer. A failed media row is dismissed.
       setOutbox((prev) => prev.filter((r) => r.localId !== localId));
     },
     [outbox, send],
@@ -312,6 +544,12 @@ export function useHouseholdChat(householdId: string, ownMembershipId: string | 
     loading,
     error,
     send,
+    sendPhoto,
+    sendVoice,
+    uploadMedia,
+    mediaUrl,
+    correctTranscript,
+    editCaption,
     retry,
     cancel,
     edit,
