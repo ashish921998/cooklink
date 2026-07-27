@@ -352,7 +352,12 @@ const styles = StyleSheet.create({
     fontSize: 18,
     backgroundColor: '#fff',
   },
-  primaryButton: { borderRadius: 8, padding: 16, backgroundColor: colors.accent, alignItems: 'center' },
+  primaryButton: {
+    borderRadius: 8,
+    padding: 16,
+    backgroundColor: colors.accent,
+    alignItems: 'center',
+  },
   primaryButtonText: { color: '#fff', fontSize: 17, fontWeight: '700' },
   disabled: { opacity: 0.7 },
   segment: { flexDirection: 'row', gap: 8 },

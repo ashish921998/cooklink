@@ -44,7 +44,12 @@ export const styles = StyleSheet.create({
     fontSize: 18,
     backgroundColor: colors.card,
   },
-  primaryButton: { borderRadius: 8, padding: 16, backgroundColor: colors.accent, alignItems: 'center' },
+  primaryButton: {
+    borderRadius: 8,
+    padding: 16,
+    backgroundColor: colors.accent,
+    alignItems: 'center',
+  },
   primaryButtonText: { color: '#fff', fontSize: 17, fontWeight: '700' },
   secondaryButton: {
     borderRadius: 8,
@@ -174,13 +179,7 @@ const tabStyles = StyleSheet.create({
 });
 
 /** A header action that opens Household Chat (issue 03 — Chat is not a tab). */
-export function ChatHeaderAction({
-  unread,
-  onPress,
-}: {
-  unread?: number;
-  onPress: () => void;
-}) {
+export function ChatHeaderAction({ unread, onPress }: { unread?: number; onPress: () => void }) {
   return (
     <Pressable
       accessibilityRole="button"

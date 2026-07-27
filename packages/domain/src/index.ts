@@ -8,6 +8,7 @@ export * from './recipes.js';
 export * from './pantry.js';
 export * from './cart.js';
 export * from './chat-events.js';
+export * from './chat-lifecycle.js';
 export * from './notifications.js';
 export * from './checkout.js';
 export * from './intent.js';

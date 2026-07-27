@@ -94,10 +94,10 @@ test('acceptance status resolves to a single verdict across phone, status, and e
   assert.equal(wrongPhone.ok, false);
   assert.equal((wrongPhone as { error: string }).error, 'invite_phone_mismatch');
 
-  const expired = acceptStatusFor(
-    pendingInvite({ expiresAt: '2026-07-02T00:00:00.000Z' }),
-    { verifiedPhone: '+919000000000', now: '2026-07-03T00:00:00.000Z' },
-  );
+  const expired = acceptStatusFor(pendingInvite({ expiresAt: '2026-07-02T00:00:00.000Z' }), {
+    verifiedPhone: '+919000000000',
+    now: '2026-07-03T00:00:00.000Z',
+  });
   assert.equal(expired.ok, false);
   assert.equal((expired as { error: string }).error, 'invite_invalid');
 });

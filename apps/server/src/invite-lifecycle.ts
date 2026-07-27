@@ -50,7 +50,10 @@ export function isInviteConsumed(invite: InviteRecord): boolean {
   return invite.status === 'accepted' || invite.status === 'revoked';
 }
 
-export function isInviteExpired(invite: InviteRecord, now: string = new Date().toISOString()): boolean {
+export function isInviteExpired(
+  invite: InviteRecord,
+  now: string = new Date().toISOString(),
+): boolean {
   return new Date(invite.expiresAt).getTime() <= new Date(now).getTime();
 }
 
@@ -69,10 +72,7 @@ export type AcceptanceError = 'invite_invalid' | 'invite_consumed' | 'invite_pho
  * centralizes "is the invite itself still good" so the handler can return one
  * of the plain-English errors the client surfaces.
  */
-export function acceptStatusFor(
-  invite: InviteRecord,
-  clock: AcceptanceClock,
-): AcceptanceStatus {
+export function acceptStatusFor(invite: InviteRecord, clock: AcceptanceClock): AcceptanceStatus {
   if (invite.status !== 'pending') return { ok: false, error: 'invite_consumed' };
   if (isInviteExpired(invite, clock.now)) return { ok: false, error: 'invite_invalid' };
   if (invite.phoneHash !== hashPhone(clock.verifiedPhone)) {

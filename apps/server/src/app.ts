@@ -1,16 +1,29 @@
 import { randomBytes, randomUUID } from 'node:crypto';
-import { and, asc, count, desc, eq, isNull } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray, isNull } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 import {
   Authorization,
   AuthorizationDeniedError,
+  canEditOrDeleteMessage,
   generateStarterPlan,
   id,
+  renderEvent,
   todayISO,
+  type Language,
+  type SystemEventType,
 } from '@cooklink/domain';
-import { householdInvites, households, memberships, plannedMeals, systemEvents } from '@cooklink/db';
+import {
+  chatMessages,
+  householdInvites,
+  householdMemberState,
+  households,
+  memberships,
+  plannedMeals,
+  systemEvents,
+  users,
+} from '@cooklink/db';
 import type { Database } from '@cooklink/db';
 import { authMiddleware, type AuthEnv } from './auth.js';
 import { DrizzleAuthorizationLookup } from './household-auth.js';
@@ -242,7 +255,10 @@ export function createApp(db: Database) {
       status: 'pending',
       expiresAt,
     });
-    return c.json({ id: inviteId, token, role: body.role, expiresAt: expiresAt.toISOString() }, 201);
+    return c.json(
+      { id: inviteId, token, role: body.role, expiresAt: expiresAt.toISOString() },
+      201,
+    );
   });
 
   /**
@@ -262,10 +278,7 @@ export function createApp(db: Database) {
       .select()
       .from(householdInvites)
       .where(
-        and(
-          eq(householdInvites.householdId, householdId),
-          eq(householdInvites.status, 'pending'),
-        ),
+        and(eq(householdInvites.householdId, householdId), eq(householdInvites.status, 'pending')),
       )
       .orderBy(desc(householdInvites.createdAt));
     return c.json({
@@ -274,7 +287,7 @@ export function createApp(db: Database) {
         role: row.role,
         phoneMasked: maskPhoneHash(row.phoneHash),
         expiresAt: row.expiresAt.toISOString(),
-        })),
+      })),
     });
   });
 
@@ -527,10 +540,306 @@ export function createApp(db: Database) {
         id<'UserId'>(user.id),
         id<'HouseholdId'>(householdId),
       );
-      return c.json({ ok: true, role: principal.role, householdId });
+      return c.json({
+        ok: true,
+        role: principal.role,
+        householdId,
+        membershipId: principal.membershipId,
+      });
     } catch {
       return c.json({ ok: false }, 403);
     }
+  });
+
+  /**
+   * Household Chat timeline (issue 04 — text chat). Returns the merged,
+   * server-ordered history of human messages and attributed system events,
+   * scoped to this Household. A pending (outbox) message is never visible to
+   * others because it does not exist until this server accepts it (issue 06,
+   * AC#12).
+   *
+   * Pagination is a forward cursor: `?afterId=` returns items strictly newer
+   * than that id, which is the contract Open Chat polls on refresh.
+   */
+  app.get('/v1/households/:householdId/chat', async (c) => {
+    const user = c.get('authUser');
+    const householdId = c.req.param('householdId');
+    const principal = await authorization.authorize(
+      id<'UserId'>(user.id),
+      id<'HouseholdId'>(householdId),
+    );
+    const limit = clampPositiveInt(c.req.query('limit'), 50, 200);
+    const afterId = c.req.query('afterId');
+
+    const messageRows = await db
+      .select()
+      .from(chatMessages)
+      .where(eq(chatMessages.householdId, principal.householdId))
+      .orderBy(asc(chatMessages.serverCreatedAt), asc(chatMessages.id));
+    const eventRows = await db
+      .select()
+      .from(systemEvents)
+      .where(eq(systemEvents.householdId, principal.householdId))
+      .orderBy(asc(systemEvents.createdAt), asc(systemEvents.id));
+
+    type Row = {
+      kind: 'message' | 'event';
+      id: string;
+      time: number;
+      payload: unknown;
+    };
+    const rows: Row[] = [
+      ...messageRows.map((m) => ({
+        kind: 'message' as const,
+        id: m.id,
+        time: m.serverCreatedAt.getTime(),
+        payload: m,
+      })),
+      ...eventRows.map((e) => ({
+        kind: 'event' as const,
+        id: e.id,
+        time: e.createdAt.getTime(),
+        payload: e,
+      })),
+    ].sort((a, b) => a.time - b.time || a.id.localeCompare(b.id));
+
+    const cursorIndex = afterId ? rows.findIndex((r) => r.id === afterId) : -1;
+    const start = afterId
+      ? cursorIndex >= 0
+        ? cursorIndex + 1
+        : rows.length // unknown cursor → nothing newer (safe poll no-op)
+      : Math.max(0, rows.length - limit);
+    const page = rows.slice(start, start + limit);
+
+    // Resolve sender display names once so the client can attribute messages,
+    // including the inactive-role label for a departed participant (issue 06 —
+    // history remains attributed after a participant leaves).
+    const senderIds = [
+      ...new Set(
+        page
+          .filter((r) => r.kind === 'message')
+          .map((r) => (r.payload as (typeof messageRows)[number]).senderId),
+      ),
+    ];
+    const actorIds = [
+      ...new Set(
+        page
+          .filter((r) => r.kind === 'event')
+          .map((r) => (r.payload as (typeof eventRows)[number]).actorId)
+          .filter((v): v is string => Boolean(v)),
+      ),
+    ];
+    const membershipIds = [...new Set([...senderIds, ...actorIds])];
+    const names = await resolveMembershipLabels(db, principal.householdId, membershipIds);
+
+    const household = await db
+      .select()
+      .from(households)
+      .where(eq(households.id, principal.householdId))
+      .limit(1);
+
+    return c.json({
+      items: page.map((r) =>
+        r.kind === 'message'
+          ? serializeChatMessage(r.payload as (typeof messageRows)[number], names)
+          : serializeChatEvent(
+              r.payload as (typeof eventRows)[number],
+              names,
+              resolveViewerLanguage(c.req.query('lang'), household[0]?.defaultLanguage),
+            ),
+      ),
+    });
+  });
+
+  /**
+   * Send a human message (issue 04 — text only in this ticket; photo and voice
+   * arrive in ticket 06). The server accepts the message only after
+   * re-authorizing the membership, so a just-removed participant's queued
+   * attempt fails with Household-access-changed (issue 06, AC#19). Server
+   * acceptance time fixes the message's position in the shared timeline; the
+   * client time is retained for diagnostics.
+   */
+  app.post('/v1/households/:householdId/chat/messages', async (c) => {
+    const user = c.get('authUser');
+    const householdId = c.req.param('householdId');
+    const principal = await authorization.authorizeCapability(
+      id<'UserId'>(user.id),
+      id<'HouseholdId'>(householdId),
+      'send_message',
+    );
+    const body: { body?: string | null; clientCreatedAt?: string } = await c.req
+      .json()
+      .catch(() => ({}));
+    const trimmed = (body.body ?? '').trim();
+    if (!trimmed) return c.json({ error: 'body_required' }, 400);
+    const messageId = randomUUID();
+    await db.insert(chatMessages).values({
+      id: messageId,
+      householdId: principal.householdId,
+      senderId: principal.membershipId,
+      kind: 'text',
+      body: trimmed,
+      caption: null,
+      mediaRef: null,
+      clientCreatedAt: new Date(body.clientCreatedAt ?? Date.now()),
+    });
+    const [created] = await db
+      .select()
+      .from(chatMessages)
+      .where(eq(chatMessages.id, messageId))
+      .limit(1);
+    const names = await resolveMembershipLabels(db, principal.householdId, [created!.senderId]);
+    return c.json(
+      {
+        item: serializeChatMessage(created!, names),
+        membershipId: principal.membershipId,
+      },
+      201,
+    );
+  });
+
+  /**
+   * Edit your own human message within the 15-minute window (issue 06, AC#11).
+   * A confirmed structured action is never mutated by editing its source
+   * message. System events are not human messages and have no edit route.
+   */
+  app.patch('/v1/households/:householdId/chat/messages/:messageId', async (c) => {
+    const user = c.get('authUser');
+    const householdId = c.req.param('householdId');
+    const principal = await authorization.authorizeCapability(
+      id<'UserId'>(user.id),
+      id<'HouseholdId'>(householdId),
+      'edit_delete_own_message',
+    );
+    const messageId = c.req.param('messageId');
+    const [message] = await db
+      .select()
+      .from(chatMessages)
+      .where(eq(chatMessages.id, messageId))
+      .limit(1);
+    if (!message || message.householdId !== principal.householdId)
+      return c.json({ error: 'not_found' }, 404);
+
+    const decision = canEditOrDeleteMessage({
+      actorId: principal.membershipId,
+      message: {
+        senderId: id<'MembershipId'>(message.senderId),
+        serverCreatedAt: message.serverCreatedAt.toISOString(),
+        deletedAt: message.deletedAt ? message.deletedAt.toISOString() : null,
+      },
+      now: new Date(),
+    });
+    if (!decision.ok) {
+      return c.json({ error: decision.reason }, decision.reason === 'not_author' ? 403 : 409);
+    }
+
+    const patch: { body?: string | null; caption?: string | null } = await c.req
+      .json()
+      .catch(() => ({}));
+    if (message.kind === 'text' && patch.body !== undefined) {
+      const trimmed = patch.body?.trim() ?? '';
+      if (!trimmed) return c.json({ error: 'body_required' }, 400);
+      patch.body = trimmed;
+    }
+    await db
+      .update(chatMessages)
+      .set({ ...patch, editedAt: new Date() })
+      .where(
+        and(
+          eq(chatMessages.id, messageId),
+          eq(chatMessages.householdId, principal.householdId),
+          eq(chatMessages.senderId, principal.membershipId),
+        ),
+      );
+    const [updated] = await db
+      .select()
+      .from(chatMessages)
+      .where(eq(chatMessages.id, messageId))
+      .limit(1);
+    const names = await resolveMembershipLabels(db, principal.householdId, [updated!.senderId]);
+    return c.json({ item: serializeChatMessage(updated!, names) });
+  });
+
+  /**
+   * Delete your own human message within the 15-minute window (issue 06,
+   * AC#11). A deletion leaves a "Message deleted" tombstone in the timeline;
+   * media access is revoked (the media-ref is cleared). The tombstone remains
+   * so the shared timeline stays coherent.
+   */
+  app.delete('/v1/households/:householdId/chat/messages/:messageId', async (c) => {
+    const user = c.get('authUser');
+    const householdId = c.req.param('householdId');
+    const principal = await authorization.authorizeCapability(
+      id<'UserId'>(user.id),
+      id<'HouseholdId'>(householdId),
+      'edit_delete_own_message',
+    );
+    const messageId = c.req.param('messageId');
+    const [message] = await db
+      .select()
+      .from(chatMessages)
+      .where(eq(chatMessages.id, messageId))
+      .limit(1);
+    if (!message || message.householdId !== principal.householdId)
+      return c.json({ error: 'not_found' }, 404);
+
+    const decision = canEditOrDeleteMessage({
+      actorId: principal.membershipId,
+      message: {
+        senderId: id<'MembershipId'>(message.senderId),
+        serverCreatedAt: message.serverCreatedAt.toISOString(),
+        deletedAt: message.deletedAt ? message.deletedAt.toISOString() : null,
+      },
+      now: new Date(),
+    });
+    if (!decision.ok) {
+      return c.json({ error: decision.reason }, decision.reason === 'not_author' ? 403 : 409);
+    }
+
+    await db
+      .update(chatMessages)
+      .set({ deletedAt: new Date(), mediaRef: null })
+      .where(
+        and(
+          eq(chatMessages.id, messageId),
+          eq(chatMessages.householdId, principal.householdId),
+          eq(chatMessages.senderId, principal.membershipId),
+        ),
+      );
+    const [updated] = await db
+      .select()
+      .from(chatMessages)
+      .where(eq(chatMessages.id, messageId))
+      .limit(1);
+    const names = await resolveMembershipLabels(db, principal.householdId, [updated!.senderId]);
+    return c.json({ item: serializeChatMessage(updated!, names) });
+  });
+
+  /**
+   * Mark Chat read through the latest visible position (issue 04 / 06). The
+   * last-read position is private per person and Household; it is never exposed
+   * as a read receipt. Pending structured action badges are derived from
+   * structured state and are not cleared here.
+   */
+  app.post('/v1/households/:householdId/chat/read', async (c) => {
+    const user = c.get('authUser');
+    const householdId = c.req.param('householdId');
+    const principal = await authorization.authorize(
+      id<'UserId'>(user.id),
+      id<'HouseholdId'>(householdId),
+    );
+    const body = await c.req.json().catch(() => ({}));
+    const lastReadMessageId = (body as { lastReadMessageId?: string })?.lastReadMessageId;
+    if (!lastReadMessageId) return c.json({ error: 'last_read_required' }, 400);
+    await db
+      .insert(householdMemberState)
+      .values({
+        userId: principal.userId,
+        householdId: principal.householdId,
+        lastReadMessageId,
+      })
+      .onDuplicateKeyUpdate({ set: { lastReadMessageId } });
+    return c.json({ ok: true });
   });
 
   app.onError((err, c) => {
@@ -606,4 +915,119 @@ function toInviteRecord(row: typeof householdInvites.$inferSelect): InviteRecord
  */
 function maskPhoneHash(phoneHash: string): string {
   return `•••• ${phoneHash.slice(-4)}`;
+}
+
+/** Clamp a pagination limit to a safe positive bound. */
+function clampPositiveInt(raw: string | undefined, fallback: number, max: number): number {
+  const parsed = Number.parseInt(raw ?? '', 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return Math.min(parsed, max);
+}
+
+type ChatMessageRow = typeof chatMessages.$inferSelect;
+type SystemEventRow = typeof systemEvents.$inferSelect;
+
+/**
+ * Resolve a stable display label for each membership id so messages and events
+ * stay attributed after a participant leaves (issue 06 — historical messages
+ * remain attributed; the UI labels the inactive role without exposing removed
+ * account details). We surface the role alongside the name so the client can
+ * show "Cook · Meera" and an inactive marker when the membership is gone.
+ */
+async function resolveMembershipLabels(
+  db: Database,
+  householdId: string,
+  membershipIds: string[],
+): Promise<Map<string, { displayName: string; role: string; active: boolean }>> {
+  const out = new Map<string, { displayName: string; role: string; active: boolean }>();
+  if (membershipIds.length === 0) return out;
+  const rows = await db
+    .select({ membership: memberships, user: users })
+    .from(memberships)
+    .innerJoin(users, eq(users.id, memberships.userId))
+    .where(and(eq(memberships.householdId, householdId), inArray(memberships.id, membershipIds)));
+  for (const row of rows) {
+    out.set(row.membership.id, {
+      displayName: row.user.displayName,
+      role: row.membership.role,
+      active: row.membership.status === 'active',
+    });
+  }
+  return out;
+}
+
+function serializeChatMessage(
+  row: ChatMessageRow,
+  labels: Map<string, { displayName: string; role: string; active: boolean }>,
+) {
+  const sender = labels.get(row.senderId);
+  return {
+    kind: 'message' as const,
+    id: row.id,
+    householdId: row.householdId,
+    senderId: row.senderId,
+    sender: sender
+      ? { displayName: sender.displayName, role: sender.role, active: sender.active }
+      : null,
+    messageKind: row.kind,
+    body: row.deletedAt ? null : row.body,
+    caption: row.deletedAt ? null : row.caption,
+    mediaRef: row.deletedAt ? null : row.mediaRef,
+    deletedAt: row.deletedAt ? row.deletedAt.toISOString() : null,
+    editedAt: row.editedAt ? row.editedAt.toISOString() : null,
+    clientCreatedAt: row.clientCreatedAt.toISOString(),
+    serverCreatedAt: row.serverCreatedAt.toISOString(),
+  };
+}
+
+function serializeChatEvent(
+  row: SystemEventRow,
+  labels: Map<string, { displayName: string; role: string; active: boolean }>,
+  lang: Language,
+) {
+  const actor = row.actorId ? (labels.get(row.actorId) ?? null) : null;
+  // Render the safe event text in the VIEWER's selected language — human
+  // messages are never translated; system events render in each viewer's
+  // English or Hindi locale (issue 06, AC#21). The raw payload is always
+  // included so the client can re-render if its own selection changes.
+  const text = renderEvent(
+    {
+      id: id<'SystemEventId'>(row.id),
+      householdId: id<'HouseholdId'>(row.householdId),
+      type: row.type as SystemEventType,
+      actorId: row.actorId ? id<'MembershipId'>(row.actorId) : null,
+      entityType: row.entityType,
+      entityId: row.entityId,
+      payload: row.payload,
+      createdAt: row.createdAt.toISOString(),
+    },
+    lang,
+  );
+  return {
+    kind: 'event' as const,
+    id: row.id,
+    householdId: row.householdId,
+    type: row.type,
+    actorId: row.actorId,
+    actor: actor
+      ? { displayName: actor.displayName, role: actor.role, active: actor.active }
+      : null,
+    entityType: row.entityType,
+    entityId: row.entityId,
+    payload: row.payload,
+    text,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
+/**
+ * Resolve the viewer's language for system-event rendering (issue 06, AC#21).
+ * The client may pass `?lang=en|hi`; otherwise the Household default applies.
+ */
+function resolveViewerLanguage(
+  requested: string | undefined,
+  householdDefault: 'en' | 'hi' | undefined,
+): Language {
+  if (requested === 'hi' || requested === 'en') return requested;
+  return householdDefault ?? 'en';
 }

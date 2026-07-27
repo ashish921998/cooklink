@@ -52,18 +52,30 @@ export type HouseholdArea = 'home' | 'work';
  * exits protected content immediately with a plain explanation (issue 03).
  * Returns `true` once the server confirms access is gone. Household-scoped
  * data is never rendered while the probe is in flight or after a denial.
+ *
+ * The probe also returns the caller's `membershipId`, which the chat client
+ * uses to attribute its own messages (issue 04).
  */
-export function useAccessProbe(householdId: string): { revoked: boolean } {
+export function useAccessProbe(householdId: string): {
+  revoked: boolean;
+  membershipId: string | null;
+} {
   const api = useApi();
   const [revoked, setRevoked] = useState(false);
+  const [membershipId, setMembershipId] = useState<string | null>(null);
 
   useEffect(() => {
     setRevoked(false);
+    setMembershipId(null);
     let cancelled = false;
-    api<{ ok: boolean }>(`/v1/households/${householdId}/access`)
+    api<{ ok: boolean; membershipId?: string }>(`/v1/households/${householdId}/access`)
       .then((res) => {
         if (cancelled) return;
-        if (!res.ok) setRevoked(true);
+        if (!res.ok) {
+          setRevoked(true);
+        } else if (res.membershipId) {
+          setMembershipId(res.membershipId);
+        }
       })
       .catch(() => {
         if (!cancelled) setRevoked(true);
@@ -73,7 +85,7 @@ export function useAccessProbe(householdId: string): { revoked: boolean } {
     };
   }, [api, householdId]);
 
-  return { revoked };
+  return { revoked, membershipId };
 }
 
 const LAST_AREA_KEY = 'cooklink.lastArea';
@@ -148,7 +160,9 @@ export function useHouseholds() {
   // defaulting to the first Household in the area.
   useEffect(() => {
     if (!households || households.length === 0) return;
-    const inArea = households.filter((h) => (area === 'work' ? h.role === 'cook' : h.role !== 'cook'));
+    const inArea = households.filter((h) =>
+      area === 'work' ? h.role === 'cook' : h.role !== 'cook',
+    );
     void (async () => {
       const key = area === 'work' ? LAST_WORK_KEY : LAST_HOME_KEY;
       const remembered = await readRemembered(key);

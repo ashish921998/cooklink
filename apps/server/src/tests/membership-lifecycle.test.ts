@@ -22,8 +22,5 @@ test('an owner cannot remove themselves', () => {
 });
 
 test('removing an already-removed membership is a no-op', () => {
-  assert.equal(
-    validateMembershipRemoval({ ...base, targetStatus: 'removed' }),
-    'already_removed',
-  );
+  assert.equal(validateMembershipRemoval({ ...base, targetStatus: 'removed' }), 'already_removed');
 });

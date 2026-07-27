@@ -54,13 +54,7 @@ export function MemberShell({ household }: { household: HouseholdSummary }) {
     );
 
   if (chatOpen) {
-    return (
-      <ChatScreen
-        household={household}
-        backLabel="Back"
-        onBack={() => setChatOpen(false)}
-      />
-    );
+    return <ChatScreen household={household} backLabel="Back" onBack={() => setChatOpen(false)} />;
   }
 
   return (
@@ -354,6 +348,11 @@ const headerStyles = {
 };
 
 const inviteStyles = {
-  row: { flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'space-between' as const, gap: 8 },
+  row: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'space-between' as const,
+    gap: 8,
+  },
   actions: { flexDirection: 'row' as const, gap: 8 },
 };

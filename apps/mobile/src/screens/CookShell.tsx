@@ -1,13 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useAccessProbe, type HouseholdSummary } from '../lib/households';
-import {
-  BottomTabs,
-  Message,
-  styles,
-  type TabKey,
-  type TabSpec,
-} from '../components/ui';
+import { BottomTabs, Message, styles, type TabKey, type TabSpec } from '../components/ui';
 import { MealPlanScreen } from './MealPlan';
 import { GroceriesScreen } from './Groceries';
 import { ChatScreen } from './Chat';
@@ -53,11 +47,7 @@ export function CookShell({
   }
 
   return (
-    <CookHousehold
-      key={selected.id}
-      household={selected}
-      onBackToList={() => setOpenId(null)}
-    />
+    <CookHousehold key={selected.id} household={selected} onBackToList={() => setOpenId(null)} />
   );
 }
 
