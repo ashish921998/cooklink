@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -8,6 +8,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSignIn, useSignUp, useUser } from '@clerk/clerk-expo';
 import { useApi } from '../src/lib/api';
 import { useHouseholds } from '../src/lib/households';
@@ -22,11 +23,30 @@ import { CookShell } from '../src/screens/CookShell';
  * entry shell: a Member or Owner lands on their active Household's Today; a
  * Cook lands on the Household list. Someone with both kinds of membership keeps
  * the last area (My home / Work) and can switch between them.
+ *
+ * If the person arrived from a `cooklink://invite?token=...` deep link while
+ * signed out, the invite token is carried as `pending_invite_token` through
+ * the OTP flow. Once sign-in completes, this route redirects to `/invite` with
+ * the token so the recipient can accept without re-tapping the WhatsApp link.
  */
 export default function Home() {
   const { isLoaded, isSignedIn, user } = useUser();
+  const router = useRouter();
+  const params = useLocalSearchParams<{ pending_invite_token?: string }>();
+
+  // After OTP completes, carry the preserved invite token back to /invite so
+  // the recipient can accept in one continuous flow.
+  useEffect(() => {
+    if (isSignedIn && params.pending_invite_token) {
+      router.replace(`/invite?token=${encodeURIComponent(params.pending_invite_token)}`);
+    }
+  }, [isSignedIn, params.pending_invite_token, router]);
+
   if (!isLoaded) return <Loading />;
   if (!isSignedIn || !user) return <PhoneOtp />;
+  // While the redirect effect runs, show a loader instead of briefly
+  // rendering HouseholdApp with a stale pending token.
+  if (params.pending_invite_token) return <Loading />;
   return <HouseholdApp />;
 }
 
@@ -136,13 +156,26 @@ function HouseholdApp() {
     selected,
     chooseHousehold,
   } = useHouseholds();
+  const router = useRouter();
+  const [onboarding, setOnboarding] = useState(false);
 
   // A profile_required error means the person has no Clerk user row yet; the
-  // server creates it lazily. A no-households state routes to owner onboarding.
+  // server creates it lazily. A no-households state offers the owner onboarding
+  // path AND the invite-acceptance path (issue 03 — a Member or Cook lands here
+  // with zero households until they accept their WhatsApp invite).
   if (error?.includes('profile_required')) return <OwnerOnboarding onCreated={loadHouseholds} />;
   if (error) return <Message title="Could not load Cooklink" body={error} />;
   if (!households) return <Loading />;
-  if (households.length === 0) return <OwnerOnboarding onCreated={loadHouseholds} />;
+  if (households.length === 0) {
+    return onboarding ? (
+      <OwnerOnboarding onCreated={loadHouseholds} onCancel={() => setOnboarding(false)} />
+    ) : (
+      <NoHouseholds
+        onStart={() => setOnboarding(true)}
+        onAcceptInvite={() => router.push('/invite')}
+      />
+    );
+  }
 
   const hasBoth = homeHouseholds.length > 0 && workHouseholds.length > 0;
 
@@ -216,7 +249,13 @@ function AreaSwitcher({
   );
 }
 
-function OwnerOnboarding({ onCreated }: { onCreated: () => Promise<unknown> }) {
+function OwnerOnboarding({
+  onCreated,
+  onCancel,
+}: {
+  onCreated: () => Promise<unknown>;
+  onCancel?: () => void;
+}) {
   const api = useApi();
   const [name, setName] = useState('My Home');
   const [servingCount, setServingCount] = useState('4');
@@ -302,6 +341,8 @@ function OwnerOnboarding({ onCreated }: { onCreated: () => Promise<unknown> }) {
       </View>
       {message ? <Text style={styles.subtitle}>{message}</Text> : null}
       <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Create active meal plan"
         style={[styles.primaryButton, busy && styles.disabled]}
         disabled={busy}
         onPress={createHousehold}
@@ -309,6 +350,56 @@ function OwnerOnboarding({ onCreated }: { onCreated: () => Promise<unknown> }) {
         <Text style={styles.primaryButtonText}>
           {busy ? 'Starting plan' : 'Create active meal plan'}
         </Text>
+      </Pressable>
+      {onCancel ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Back to join choices"
+          style={styles.ghostButton}
+          onPress={onCancel}
+        >
+          <Text style={styles.ghostButtonText}>Back</Text>
+        </Pressable>
+      ) : null}
+    </ScrollView>
+  );
+}
+
+/**
+ * The zero-households entry choice (issue 03). A person who just verified their
+ * phone either starts their own household as an Owner or accepts a WhatsApp
+ * invite to join someone else's as a Member or Cook. Both paths are offered so
+ * a Cook with no households is never forced into owner onboarding.
+ */
+function NoHouseholds({
+  onStart,
+  onAcceptInvite,
+}: {
+  onStart: () => void;
+  onAcceptInvite: () => void;
+}) {
+  return (
+    <ScrollView contentContainerStyle={styles.screen}>
+      <Text style={styles.eyebrow}>Welcome</Text>
+      <Text style={styles.title}>Join Cooklink</Text>
+      <Text style={styles.subtitle}>
+        Start your own household, or accept an invite from someone who invited you.
+      </Text>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Start a household"
+        style={styles.primaryButton}
+        onPress={onStart}
+      >
+        <Text style={styles.primaryButtonText}>Start a household</Text>
+      </Pressable>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Accept an invite"
+        style={styles.ghostButton}
+        onPress={onAcceptInvite}
+      >
+        <Text style={styles.ghostButtonText}>I have an invite</Text>
       </Pressable>
     </ScrollView>
   );
@@ -359,6 +450,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   primaryButtonText: { color: '#fff', fontSize: 17, fontWeight: '700' },
+  ghostButton: {
+    borderRadius: 8,
+    padding: 14,
+    backgroundColor: colors.field,
+    alignItems: 'center',
+  },
+  ghostButtonText: { color: colors.ink, fontSize: 16, fontWeight: '700' },
   disabled: { opacity: 0.7 },
   segment: { flexDirection: 'row', gap: 8 },
   segmentButton: {

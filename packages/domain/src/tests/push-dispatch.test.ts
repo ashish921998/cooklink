@@ -329,7 +329,13 @@ test('buildMessagePushes: messages share collapse key; body includes preview tex
   const input = makeBaseInput(cookMembershipId);
   const recipients = resolveRecipientsForMessage(input);
   const msg = makeMessage(cookMembershipId, 'Bring milk tomorrow');
-  const pushes = buildMessagePushes(makeHousehold(), recipients, msg, 'Meera', 'Bring milk tomorrow');
+  const pushes = buildMessagePushes(
+    makeHousehold(),
+    recipients,
+    msg,
+    'Meera',
+    'Bring milk tomorrow',
+  );
   assert.ok(pushes.length > 0);
   for (const p of pushes) {
     assert.equal(p.collapseKey, collapseKey(householdId));

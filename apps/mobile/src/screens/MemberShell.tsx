@@ -163,14 +163,17 @@ function OwnerMembership({
 
   // Open WhatsApp with a pre-filled invite message so the Owner delivers the
   // token through WhatsApp as required (issue 03 — invites are shared through
-  // WhatsApp). Falls back to displaying the token if WhatsApp is unavailable.
+  // WhatsApp). The message includes a tappable cooklink:// deep link so the
+  // recipient can accept in one tap; the token is also shown as a fallback for
+  // manual entry when the app is not yet installed or the link cannot open.
   async function sendViaWhatsApp(
     invitePhone: string,
     inviteToken: string,
     inviteRole: 'member' | 'cook',
   ) {
     const normalized = invitePhone.replace(/[^\d]/g, '');
-    const message = `You're invited to join ${household.name} as a ${inviteRole} on Cooklink. Open the app and enter this invite token: ${inviteToken}`;
+    const deepLink = `cooklink://invite?token=${encodeURIComponent(inviteToken)}`;
+    const message = `You're invited to join ${household.name} as a ${inviteRole} on Cooklink. Tap to accept: ${deepLink} (or open Cooklink and enter token: ${inviteToken})`;
     const url = `https://wa.me/${normalized}?text=${encodeURIComponent(message)}`;
     try {
       const canOpen = await Linking.canOpenURL(url);
@@ -182,9 +185,7 @@ function OwnerMembership({
     } catch {
       // Fall through to the manual fallback below.
     }
-    setNotice(
-      `WhatsApp is not available. Share this token with the ${inviteRole}: ${inviteToken}`,
-    );
+    setNotice(`WhatsApp is not available. Share this link with the ${inviteRole}: ${deepLink}`);
   }
 
   async function createInvite() {

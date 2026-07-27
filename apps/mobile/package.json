@@ -7,7 +7,8 @@
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test \"src/**/*.test.ts\""
   },
   "dependencies": {
     "@clerk/clerk-expo": "^2.4.2",
@@ -23,7 +24,9 @@
     "react-native-screens": "~4.1.0"
   },
   "devDependencies": {
+    "@types/node": "^22.20.1",
     "@types/react": "~18.3.12",
+    "tsx": "^4.23.1",
     "typescript": "^5.6.3"
   }
 }

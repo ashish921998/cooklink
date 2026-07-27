@@ -42,41 +42,32 @@ test(
       const { householdId } = (await createRes.json()) as { householdId: string };
 
       // AC#2 — set per-Household notification override to Muted.
-      const overrideRes = await app.request(
-        `/v1/households/${householdId}/notification-override`,
-        {
-          method: 'PATCH',
-          headers: ownerHeaders,
-          body: JSON.stringify({ level: 'muted' }),
-        },
-      );
+      const overrideRes = await app.request(`/v1/households/${householdId}/notification-override`, {
+        method: 'PATCH',
+        headers: ownerHeaders,
+        body: JSON.stringify({ level: 'muted' }),
+      });
       assert.equal(overrideRes.status, 200);
       const override = (await overrideRes.json()) as { ok: boolean; override: string | null };
       assert.equal(override.ok, true);
       assert.equal(override.override, 'muted');
 
       // AC#2 — null override restores the role default.
-      const restoreRes = await app.request(
-        `/v1/households/${householdId}/notification-override`,
-        {
-          method: 'PATCH',
-          headers: ownerHeaders,
-          body: JSON.stringify({ level: null }),
-        },
-      );
+      const restoreRes = await app.request(`/v1/households/${householdId}/notification-override`, {
+        method: 'PATCH',
+        headers: ownerHeaders,
+        body: JSON.stringify({ level: null }),
+      });
       assert.equal(restoreRes.status, 200);
       const restored = (await restoreRes.json()) as { ok: boolean; override: string | null };
       assert.equal(restored.override, null);
 
       // AC#2 — invalid level is rejected.
-      const badLevelRes = await app.request(
-        `/v1/households/${householdId}/notification-override`,
-        {
-          method: 'PATCH',
-          headers: ownerHeaders,
-          body: JSON.stringify({ level: 'bogus' }),
-        },
-      );
+      const badLevelRes = await app.request(`/v1/households/${householdId}/notification-override`, {
+        method: 'PATCH',
+        headers: ownerHeaders,
+        body: JSON.stringify({ level: 'bogus' }),
+      });
       assert.equal(badLevelRes.status, 400);
 
       // AC#2 — per-role default.

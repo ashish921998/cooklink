@@ -14,12 +14,7 @@ import { useApi } from './api';
  */
 
 export type GroceryRequestStatus =
-  | 'pending'
-  | 'approved'
-  | 'rejected'
-  | 'cancelled'
-  | 'in_order'
-  | 'fulfilled';
+  'pending' | 'approved' | 'rejected' | 'cancelled' | 'in_order' | 'fulfilled';
 
 export interface GroceryRequestItem {
   id: string;

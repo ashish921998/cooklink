@@ -91,13 +91,15 @@ export function decideGrocerySuggestion(input: {
  * to the same key.
  */
 export function normalizeItemText(raw: string): string {
-  return raw
-    .toLowerCase()
-    // strip punctuation but preserve letters, digits, combining marks (Hindi
-    // matras like 'ा' are marks, not letters), and whitespace.
-    .replace(/[^\p{L}\p{N}\p{M}\s]/gu, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+  return (
+    raw
+      .toLowerCase()
+      // strip punctuation but preserve letters, digits, combining marks (Hindi
+      // matras like 'ा' are marks, not letters), and whitespace.
+      .replace(/[^\p{L}\p{N}\p{M}\s]/gu, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+  );
 }
 
 /**
@@ -263,7 +265,10 @@ export function conflictActorLabel(actorName: string, lang: Language): string {
  */
 export function assertNoOrderPlacement(decision: RequestResolutionDecision): void {
   if (decision.ok) {
-    if ((decision.nextStatus as string) === 'placed' || (decision.nextStatus as string) === 'in_order') {
+    if (
+      (decision.nextStatus as string) === 'placed' ||
+      (decision.nextStatus as string) === 'in_order'
+    ) {
       throw new Error('Grocery Request resolution must never place an order.');
     }
   }

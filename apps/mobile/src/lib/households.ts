@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
+import { AppState } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import { useApi } from './api';
+import { ApiError } from './api';
 
 /**
  * The role a person holds within one Household. The server is the only source
@@ -67,7 +69,29 @@ export type HouseholdArea = 'home' | 'work';
  *
  * The probe also returns the caller's `membershipId`, which the chat client
  * uses to attribute its own messages (issue 04).
+ *
+ * The probe re-runs whenever the app returns to the foreground so a removal
+ * that happened while the app was backgrounded is caught on resume rather
+ * than only when the Household id changes (issue 03 — recheck on refocus).
+ *
+ * While the app is in the foreground, the probe also re-runs on a 30-second
+ * interval so a removal that happens during active use is caught within 30
+ * seconds without waiting for a background→foreground transition (issue 03/04
+ * — "removed participants immediately lose Chat access"). V1 has no
+ * websocket/realtime push, so "immediately" means "on the next server
+ * contact"; the 30-second probe is the lightest foreground contact that
+ * still feels immediate. The interval is paused while the app is backgrounded
+ * to avoid unnecessary battery drain.
+ *
+ * Only a definitive server denial (HTTP 403 or 404) flips `revoked` to true.
+ * A network error or 5xx leaves the last known state intact so a transient
+ * connectivity failure never kicks the user out of their own household
+ * (issue 03 — do not treat connectivity failures as revoked access).
  */
+
+/** The foreground re-probe cadence (issue 03/04 — "immediately exits"). */
+const FOREGROUND_PROBE_INTERVAL_MS = 30_000;
+
 export function useAccessProbe(householdId: string): {
   revoked: boolean;
   membershipId: string | null;
@@ -76,26 +100,69 @@ export function useAccessProbe(householdId: string): {
   const [revoked, setRevoked] = useState(false);
   const [membershipId, setMembershipId] = useState<string | null>(null);
 
+  const probe = useCallback(async () => {
+    // Do NOT clear membershipId here — the periodic 30-second probe would
+    // flicker the Chat composer and mark-read logic to null on every tick.
+    // membershipId is cleared only on Household change (the effect below).
+    try {
+      const res = await api<{ ok: boolean; membershipId?: string }>(
+        `/v1/households/${householdId}/access`,
+      );
+      // A 200 means access is intact; the `ok` flag is always true on success
+      // (a denial is a 403 thrown below), so reaching here clears any prior
+      // revoked state, e.g. after the owner re-invites a removed person.
+      setRevoked(false);
+      if (res.membershipId) setMembershipId(res.membershipId);
+    } catch (err) {
+      if (err instanceof ApiError && (err.status === 403 || err.status === 404)) {
+        setRevoked(true);
+      }
+      // Any other failure (network error, 5xx) must NOT be treated as revoked:
+      // keep the last known state so a connectivity blip does not exit the
+      // user from protected content with a misleading "Access changed" screen.
+    }
+  }, [api, householdId]);
+
+  // Probe on mount and whenever the open Household changes. Reset the prior
+  // household's revoked flag and membershipId so its denial state never leaks
+  // into the next one.
   useEffect(() => {
     setRevoked(false);
     setMembershipId(null);
-    let cancelled = false;
-    api<{ ok: boolean; membershipId?: string }>(`/v1/households/${householdId}/access`)
-      .then((res) => {
-        if (cancelled) return;
-        if (!res.ok) {
-          setRevoked(true);
-        } else if (res.membershipId) {
-          setMembershipId(res.membershipId);
+    void probe();
+  }, [probe]);
+
+  // Re-probe when the app returns to the foreground so a removal that happened
+  // while it was backgrounded is caught immediately on resume (issue 03). While
+  // the app stays in the foreground, a 30-second interval catches removals
+  // during active use without waiting for a background→foreground transition
+  // (issue 03/04 — "immediately exits"). The interval is paused while
+  // backgrounded to avoid unnecessary battery drain.
+  useEffect(() => {
+    let handle: ReturnType<typeof setInterval> | null = null;
+    // Start the interval immediately if the app is already in the foreground
+    // when the hook mounts — the 'change' event only fires on transitions, so
+    // without this check the periodic probe would never begin during the
+    // initial foreground session (the common case).
+    if (AppState.currentState === 'active') {
+      handle = setInterval(() => void probe(), FOREGROUND_PROBE_INTERVAL_MS);
+    }
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        void probe();
+        if (!handle) {
+          handle = setInterval(() => void probe(), FOREGROUND_PROBE_INTERVAL_MS);
         }
-      })
-      .catch(() => {
-        if (!cancelled) setRevoked(true);
-      });
+      } else if (handle) {
+        clearInterval(handle);
+        handle = null;
+      }
+    });
     return () => {
-      cancelled = true;
+      subscription.remove();
+      if (handle) clearInterval(handle);
     };
-  }, [api, householdId]);
+  }, [probe]);
 
   return { revoked, membershipId };
 }

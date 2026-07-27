@@ -20,7 +20,9 @@ import type { ActionSuggestion, GroceryRequest } from '../types.js';
 const now = new Date('2026-07-27T10:00:00Z');
 const future = new Date('2026-07-27T11:00:00Z').toISOString();
 
-function pendingSuggestion(overrides: Partial<ActionSuggestion> = {}): Pick<ActionSuggestion, 'status' | 'expiresAt'> {
+function pendingSuggestion(
+  overrides: Partial<ActionSuggestion> = {},
+): Pick<ActionSuggestion, 'status' | 'expiresAt'> {
   return { status: 'pending', expiresAt: future, ...overrides };
 }
 
@@ -146,8 +148,15 @@ test('normalizeItemText lowercases, strips punctuation, collapses whitespace', (
 });
 
 test('findSimilarPendingRequest matches a normalized pending request (AC#5)', () => {
-  const existing = makeRequest({ id: 'gr-old' as GroceryRequest['id'], itemText: 'tomato', createdAt: '2026-07-27T08:00:00Z' });
-  const found = findSimilarPendingRequest([existing, makeRequest({ itemText: 'Onion' })], 'Tomato!');
+  const existing = makeRequest({
+    id: 'gr-old' as GroceryRequest['id'],
+    itemText: 'tomato',
+    createdAt: '2026-07-27T08:00:00Z',
+  });
+  const found = findSimilarPendingRequest(
+    [existing, makeRequest({ itemText: 'Onion' })],
+    'Tomato!',
+  );
   assert.equal(found?.id, existing.id);
 });
 

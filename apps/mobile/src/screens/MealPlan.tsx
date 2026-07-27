@@ -17,33 +17,36 @@ import { Card, Loading, Message, styles } from '../components/ui';
 
 type Lang = 'en' | 'hi';
 
-const LABELS: Record<Lang, {
-  cook: string;
-  member: string;
-  mealPlan: string;
-  noMeals: string;
-  today: string;
-  special: string;
-  servings: string;
-  edit: string;
-  swap: string;
-  regenerate: string;
-  regenerateDay: string;
-  regenerateWeek: string;
-  searchReplace: string;
-  save: string;
-  cancel: string;
-  useLatest: string;
-  mealName: string;
-  searchPlaceholder: string;
-  dietMismatch: string;
-  conflictTitle: string;
-  conflictBody: string;
-  regenerating: string;
-  saving: string;
-  swapPrompt: string;
-  swapCancel: string;
-}> = {
+const LABELS: Record<
+  Lang,
+  {
+    cook: string;
+    member: string;
+    mealPlan: string;
+    noMeals: string;
+    today: string;
+    special: string;
+    servings: string;
+    edit: string;
+    swap: string;
+    regenerate: string;
+    regenerateDay: string;
+    regenerateWeek: string;
+    searchReplace: string;
+    save: string;
+    cancel: string;
+    useLatest: string;
+    mealName: string;
+    searchPlaceholder: string;
+    dietMismatch: string;
+    conflictTitle: string;
+    conflictBody: string;
+    regenerating: string;
+    saving: string;
+    swapPrompt: string;
+    swapCancel: string;
+  }
+> = {
   en: {
     cook: 'Cook',
     member: 'Member',
@@ -65,8 +68,7 @@ const LABELS: Record<Lang, {
     searchPlaceholder: 'Search recipes…',
     dietMismatch: 'Out of diet',
     conflictTitle: 'Meal changed',
-    conflictBody:
-      'Someone else updated this meal. Review the latest version and try again.',
+    conflictBody: 'Someone else updated this meal. Review the latest version and try again.',
     regenerating: 'Regenerating…',
     saving: 'Saving…',
     swapPrompt: 'Tap another meal to swap',
@@ -115,9 +117,7 @@ export function MealPlanScreen({ household }: { household: HouseholdSummary }) {
     setMeals(null);
     setError(null);
     try {
-      const data = await api<{ meals: PlannedMeal[] }>(
-        `/v1/households/${household.id}/meal-plan`,
-      );
+      const data = await api<{ meals: PlannedMeal[] }>(`/v1/households/${household.id}/meal-plan`);
       setMeals(data.meals);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load meal plan.');
@@ -138,9 +138,7 @@ export function MealPlanScreen({ household }: { household: HouseholdSummary }) {
 
   // Merge a swapped pair back into the local plan.
   const mergeSwapped = useCallback((a: PlannedMeal, b: PlannedMeal) => {
-    setMeals((prev) =>
-      (prev ?? []).map((m) => (m.id === a.id ? a : m.id === b.id ? b : m)),
-    );
+    setMeals((prev) => (prev ?? []).map((m) => (m.id === a.id ? a : m.id === b.id ? b : m)));
   }, []);
 
   // Handle a stale-version conflict (409): surface the current meal for
@@ -231,8 +229,7 @@ export function MealPlanScreen({ household }: { household: HouseholdSummary }) {
   }
 
   if (!meals) return <Loading />;
-  if (error && meals.length === 0)
-    return <Message title="Meal Plan" body={error} />;
+  if (error && meals.length === 0) return <Message title="Meal Plan" body={error} />;
 
   return (
     <ScrollView contentContainerStyle={styles.screen}>
@@ -442,9 +439,7 @@ function MealDetailSheet({
                 {t.servings}: {meal.servings}
                 {meal.servingsOverridden ? ' (overridden)' : ''}
               </Text>
-              {meal.isSpecial ? (
-                <Text style={styles.subtitle}> · {t.special}</Text>
-              ) : null}
+              {meal.isSpecial ? <Text style={styles.subtitle}> · {t.special}</Text> : null}
             </View>
 
             <Pressable
@@ -462,11 +457,7 @@ function MealDetailSheet({
               <Text style={styles.ghostButtonText}>{t.searchReplace}</Text>
             </Pressable>
 
-            <ServingsEditor
-              meal={meal}
-              lang={lang}
-              onSave={(servings) => onEdit({ servings })}
-            />
+            <ServingsEditor meal={meal} lang={lang} onSave={(servings) => onEdit({ servings })} />
 
             <Pressable
               accessibilityRole="button"
@@ -475,11 +466,7 @@ function MealDetailSheet({
             >
               <Text style={styles.ghostButtonText}>{t.regenerate}</Text>
             </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              style={styles.ghostButton}
-              onPress={onSwap}
-            >
+            <Pressable accessibilityRole="button" style={styles.ghostButton} onPress={onSwap}>
               <Text style={styles.ghostButtonText}>{t.swap}</Text>
             </Pressable>
           </>
@@ -505,11 +492,7 @@ function MealDetailSheet({
               >
                 <Text style={styles.ghostButtonText}>{t.cancel}</Text>
               </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                style={styles.primaryButton}
-                onPress={saveName}
-              >
+              <Pressable accessibilityRole="button" style={styles.primaryButton} onPress={saveName}>
                 <Text style={styles.primaryButtonText}>{t.save}</Text>
               </Pressable>
             </View>
@@ -621,18 +604,10 @@ function ConflictSheet({
           </Text>
         </Card>
         <View style={sheetStyles.actions}>
-          <Pressable
-            accessibilityRole="button"
-            style={styles.ghostButton}
-            onPress={onClose}
-          >
+          <Pressable accessibilityRole="button" style={styles.ghostButton} onPress={onClose}>
             <Text style={styles.ghostButtonText}>{t.cancel}</Text>
           </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            style={styles.primaryButton}
-            onPress={onUseLatest}
-          >
+          <Pressable accessibilityRole="button" style={styles.primaryButton} onPress={onUseLatest}>
             <Text style={styles.primaryButtonText}>{t.useLatest}</Text>
           </Pressable>
         </View>
@@ -679,5 +654,12 @@ const sheetStyles = StyleSheet.create({
 });
 
 const servingsStyles = StyleSheet.create({
-  input: { width: 60, borderWidth: 1, borderColor: '#c8d0c8', borderRadius: 8, padding: 8, fontSize: 16 },
+  input: {
+    width: 60,
+    borderWidth: 1,
+    borderColor: '#c8d0c8',
+    borderRadius: 8,
+    padding: 8,
+    fontSize: 16,
+  },
 });

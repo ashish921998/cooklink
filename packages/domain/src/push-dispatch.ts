@@ -117,9 +117,7 @@ export function resolveRecipientsForEvent(
  * The sender never receives their own message (AC#5). Muted suppresses;
  * All and Important both push human messages (issue 12, AC#3).
  */
-export function resolveRecipientsForMessage(
-  input: ResolveRecipientsInput,
-): PushRecipient[] {
+export function resolveRecipientsForMessage(input: ResolveRecipientsInput): PushRecipient[] {
   const recipients: PushRecipient[] = [];
   for (const membership of input.members) {
     if (membership.status !== 'active') continue;
@@ -230,8 +228,7 @@ export interface PushDispatcher {
 }
 
 export type DispatchResult =
-  | { ok: true }
-  | { ok: false; reason: 'invalid_token' | 'rate_limited' | 'error'; detail?: string };
+  { ok: true } | { ok: false; reason: 'invalid_token' | 'rate_limited' | 'error'; detail?: string };
 
 /**
  * A recording {@link PushDispatcher} for tests. Captures every notification

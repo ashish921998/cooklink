@@ -226,3 +226,129 @@ test(
     }
   },
 );
+
+/**
+ * The two-Cook-per-Household limit must hold under concurrent acceptances.
+ * Without serializing the limit check, two parallel cook acceptances into a
+ * household that already has one cook would each read count=1, both pass the
+ * `< 2` guard, and both insert — leaving three active cooks (a violation).
+ * The household row lock taken inside the acceptance transaction serializes
+ * the two acceptances so exactly one wins and the other is rejected with
+ * `household_cook_limit_reached`. The per-Cook 30-Household budget is
+ * serialized by the same mechanism via the user row lock.
+ */
+test(
+  'two concurrent cook acceptances cannot exceed the two-cook household limit',
+  { skip: process.env.DATABASE_URL ? false : 'DATABASE_URL is required for MySQL app tests' },
+  async () => {
+    const previousDevAuth = process.env.COOKLINK_DEV_AUTH;
+    process.env.COOKLINK_DEV_AUTH = 'true';
+    try {
+      const app = createApp(createDatabase(process.env.DATABASE_URL));
+      const suffix = crypto.randomUUID();
+
+      const ownerHeaders = {
+        'content-type': 'application/json',
+        'x-clerk-user-id': `ticket-03-owner-c-${suffix}`,
+        'x-cooklink-dev-phone': '+919300000020',
+        'x-cooklink-dev-name': 'Ticket 03 Owner C',
+      };
+      const cook1Headers = {
+        'content-type': 'application/json',
+        'x-clerk-user-id': `ticket-03-cook1-c-${suffix}`,
+        'x-cooklink-dev-phone': '+919300000021',
+        'x-cooklink-dev-name': 'Ticket 03 Cook 1',
+      };
+      const cook2Headers = {
+        'content-type': 'application/json',
+        'x-clerk-user-id': `ticket-03-cook2-c-${suffix}`,
+        'x-cooklink-dev-phone': '+919300000022',
+        'x-cooklink-dev-name': 'Ticket 03 Cook 2',
+      };
+
+      // Owner creates a household and lands the first cook (count = 1).
+      const createRes = await app.request('/v1/households', {
+        method: 'POST',
+        headers: ownerHeaders,
+        body: JSON.stringify({ name: `Ticket 03 C ${suffix}` }),
+      });
+      const { householdId } = (await createRes.json()) as { householdId: string };
+
+      const firstInviteRes = await app.request(`/v1/households/${householdId}/invites`, {
+        method: 'POST',
+        headers: ownerHeaders,
+        body: JSON.stringify({ phone: '+919300000021', role: 'cook' }),
+      });
+      const firstInvite = (await firstInviteRes.json()) as { token: string };
+      const firstAccept = await app.request('/v1/invites/accept', {
+        method: 'POST',
+        headers: cook1Headers,
+        body: JSON.stringify({ token: firstInvite.token }),
+      });
+      assert.equal(firstAccept.status, 200);
+
+      // Owner issues two more cook invites for two different phones and the
+      // two recipients accept simultaneously. Only one may succeed; the
+      // household must end with exactly two active cooks.
+      const inviteA = (await (
+        await app.request(`/v1/households/${householdId}/invites`, {
+          method: 'POST',
+          headers: ownerHeaders,
+          body: JSON.stringify({ phone: '+919300000022', role: 'cook' }),
+        })
+      ).json()) as { token: string };
+      const inviteB = (await (
+        await app.request(`/v1/households/${householdId}/invites`, {
+          method: 'POST',
+          headers: ownerHeaders,
+          body: JSON.stringify({ phone: '+919300000023', role: 'cook' }),
+        })
+      ).json()) as { token: string };
+      const cook3Headers = {
+        'content-type': 'application/json',
+        'x-clerk-user-id': `ticket-03-cook3-c-${suffix}`,
+        'x-cooklink-dev-phone': '+919300000023',
+        'x-cooklink-dev-name': 'Ticket 03 Cook 3',
+      };
+
+      const [acceptA, acceptB] = await Promise.all([
+        app.request('/v1/invites/accept', {
+          method: 'POST',
+          headers: cook2Headers,
+          body: JSON.stringify({ token: inviteA.token }),
+        }),
+        app.request('/v1/invites/accept', {
+          method: 'POST',
+          headers: cook3Headers,
+          body: JSON.stringify({ token: inviteB.token }),
+        }),
+      ]);
+
+      const statuses = [acceptA.status, acceptB.status].sort();
+      assert.ok(
+        statuses.includes(200),
+        `one concurrent acceptance should succeed (got ${statuses.join(',')})`,
+      );
+      assert.ok(
+        statuses.includes(409),
+        `the other should be rejected as cook_limit_reached (got ${statuses.join(',')})`,
+      );
+
+      // The household must have exactly two active cooks, never three.
+      const membersRes = await app.request(`/v1/households/${householdId}/members`, {
+        headers: ownerHeaders,
+      });
+      const members = (await membersRes.json()) as {
+        members: { id: string; role: string; status: string }[];
+      };
+      const activeCooks = members.members.filter((m) => m.role === 'cook' && m.status === 'active');
+      assert.equal(activeCooks.length, 2, 'the household must not exceed two active cooks');
+    } finally {
+      if (previousDevAuth === undefined) {
+        delete process.env.COOKLINK_DEV_AUTH;
+      } else {
+        process.env.COOKLINK_DEV_AUTH = previousDevAuth;
+      }
+    }
+  },
+);

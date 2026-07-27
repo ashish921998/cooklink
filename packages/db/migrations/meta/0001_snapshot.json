@@ -69,17 +69,12 @@
       "indexes": {
         "authorIdx": {
           "name": "authorIdx",
-          "columns": [
-            "author_id",
-            "status"
-          ],
+          "columns": ["author_id", "status"],
           "isUnique": false
         },
         "householdIdx": {
           "name": "householdIdx",
-          "columns": [
-            "household_id"
-          ],
+          "columns": ["household_id"],
           "isUnique": false
         }
       },
@@ -87,9 +82,7 @@
       "compositePrimaryKeys": {
         "action_suggestions_id": {
           "name": "action_suggestions_id",
-          "columns": [
-            "id"
-          ]
+          "columns": ["id"]
         }
       },
       "uniqueConstraints": {},
@@ -180,10 +173,7 @@
       "indexes": {
         "householdServerIdx": {
           "name": "householdServerIdx",
-          "columns": [
-            "household_id",
-            "server_created_at"
-          ],
+          "columns": ["household_id", "server_created_at"],
           "isUnique": false
         }
       },
@@ -191,9 +181,7 @@
       "compositePrimaryKeys": {
         "chat_messages_id": {
           "name": "chat_messages_id",
-          "columns": [
-            "id"
-          ]
+          "columns": ["id"]
         }
       },
       "uniqueConstraints": {},
@@ -271,9 +259,7 @@
       "indexes": {
         "householdIdx": {
           "name": "householdIdx",
-          "columns": [
-            "household_id"
-          ],
+          "columns": ["household_id"],
           "isUnique": false
         }
       },
@@ -281,9 +267,7 @@
       "compositePrimaryKeys": {
         "checkout_audit_id": {
           "name": "checkout_audit_id",
-          "columns": [
-            "id"
-          ]
+          "columns": ["id"]
         }
       },
       "uniqueConstraints": {},
@@ -346,9 +330,7 @@
       "indexes": {
         "tokenIdx": {
           "name": "tokenIdx",
-          "columns": [
-            "push_token"
-          ],
+          "columns": ["push_token"],
           "isUnique": true
         }
       },
@@ -356,9 +338,7 @@
       "compositePrimaryKeys": {
         "device_registrations_id": {
           "name": "device_registrations_id",
-          "columns": [
-            "id"
-          ]
+          "columns": ["id"]
         }
       },
       "uniqueConstraints": {},
@@ -399,9 +379,7 @@
       "indexes": {
         "householdIdx": {
           "name": "householdIdx",
-          "columns": [
-            "household_id"
-          ],
+          "columns": ["household_id"],
           "isUnique": false
         }
       },
@@ -409,9 +387,7 @@
       "compositePrimaryKeys": {
         "food_avoidances_id": {
           "name": "food_avoidances_id",
-          "columns": [
-            "id"
-          ]
+          "columns": ["id"]
         }
       },
       "uniqueConstraints": {},
@@ -475,9 +451,7 @@
       "indexes": {
         "householdIdx": {
           "name": "householdIdx",
-          "columns": [
-            "household_id"
-          ],
+          "columns": ["household_id"],
           "isUnique": false
         }
       },
@@ -485,9 +459,7 @@
       "compositePrimaryKeys": {
         "grocery_orders_id": {
           "name": "grocery_orders_id",
-          "columns": [
-            "id"
-          ]
+          "columns": ["id"]
         }
       },
       "uniqueConstraints": {},
@@ -573,10 +545,7 @@
       "indexes": {
         "householdStatusIdx": {
           "name": "householdStatusIdx",
-          "columns": [
-            "household_id",
-            "status"
-          ],
+          "columns": ["household_id", "status"],
           "isUnique": false
         }
       },
@@ -584,9 +553,7 @@
       "compositePrimaryKeys": {
         "grocery_requests_id": {
           "name": "grocery_requests_id",
-          "columns": [
-            "id"
-          ]
+          "columns": ["id"]
         }
       },
       "uniqueConstraints": {},
@@ -664,16 +631,12 @@
       "indexes": {
         "tokenIdx": {
           "name": "tokenIdx",
-          "columns": [
-            "token"
-          ],
+          "columns": ["token"],
           "isUnique": true
         },
         "householdIdx": {
           "name": "householdIdx",
-          "columns": [
-            "household_id"
-          ],
+          "columns": ["household_id"],
           "isUnique": false
         }
       },
@@ -681,9 +644,7 @@
       "compositePrimaryKeys": {
         "household_invites_id": {
           "name": "household_invites_id",
-          "columns": [
-            "id"
-          ]
+          "columns": ["id"]
         }
       },
       "uniqueConstraints": {},
@@ -724,10 +685,7 @@
       "indexes": {
         "memberStateIdx": {
           "name": "memberStateIdx",
-          "columns": [
-            "user_id",
-            "household_id"
-          ],
+          "columns": ["user_id", "household_id"],
           "isUnique": true
         }
       },
@@ -829,9 +787,7 @@
       "compositePrimaryKeys": {
         "households_id": {
           "name": "households_id",
-          "columns": [
-            "id"
-          ]
+          "columns": ["id"]
         }
       },
       "uniqueConstraints": {},
@@ -890,9 +846,7 @@
       "compositePrimaryKeys": {
         "idempotency_keys_key": {
           "name": "idempotency_keys_key",
-          "columns": [
-            "key"
-          ]
+          "columns": ["key"]
         }
       },
       "uniqueConstraints": {},
@@ -964,25 +918,17 @@
       "indexes": {
         "householdIdx": {
           "name": "householdIdx",
-          "columns": [
-            "household_id"
-          ],
+          "columns": ["household_id"],
           "isUnique": false
         },
         "userIdx": {
           "name": "userIdx",
-          "columns": [
-            "user_id"
-          ],
+          "columns": ["user_id"],
           "isUnique": false
         },
         "userHouseholdStatusIdx": {
           "name": "userHouseholdStatusIdx",
-          "columns": [
-            "user_id",
-            "household_id",
-            "status"
-          ],
+          "columns": ["user_id", "household_id", "status"],
           "isUnique": true
         }
       },
@@ -990,9 +936,7 @@
       "compositePrimaryKeys": {
         "memberships_id": {
           "name": "memberships_id",
-          "columns": [
-            "id"
-          ]
+          "columns": ["id"]
         }
       },
       "uniqueConstraints": {},
@@ -1076,10 +1020,7 @@
       "indexes": {
         "householdKeyIdx": {
           "name": "householdKeyIdx",
-          "columns": [
-            "household_id",
-            "ingredient_key"
-          ],
+          "columns": ["household_id", "ingredient_key"],
           "isUnique": false
         }
       },
@@ -1087,9 +1028,7 @@
       "compositePrimaryKeys": {
         "pantry_ledger_id": {
           "name": "pantry_ledger_id",
-          "columns": [
-            "id"
-          ]
+          "columns": ["id"]
         }
       },
       "uniqueConstraints": {},
@@ -1191,19 +1130,12 @@
       "indexes": {
         "slotIdx": {
           "name": "slotIdx",
-          "columns": [
-            "household_id",
-            "date",
-            "meal_type"
-          ],
+          "columns": ["household_id", "date", "meal_type"],
           "isUnique": true
         },
         "householdDateIdx": {
           "name": "householdDateIdx",
-          "columns": [
-            "household_id",
-            "date"
-          ],
+          "columns": ["household_id", "date"],
           "isUnique": false
         }
       },
@@ -1211,9 +1143,7 @@
       "compositePrimaryKeys": {
         "planned_meals_id": {
           "name": "planned_meals_id",
-          "columns": [
-            "id"
-          ]
+          "columns": ["id"]
         }
       },
       "uniqueConstraints": {},
@@ -1307,9 +1237,7 @@
       "compositePrimaryKeys": {
         "recipes_id": {
           "name": "recipes_id",
-          "columns": [
-            "id"
-          ]
+          "columns": ["id"]
         }
       },
       "uniqueConstraints": {},
@@ -1394,9 +1322,7 @@
       "indexes": {
         "householdIdx": {
           "name": "householdIdx",
-          "columns": [
-            "household_id"
-          ],
+          "columns": ["household_id"],
           "isUnique": false
         }
       },
@@ -1404,9 +1330,7 @@
       "compositePrimaryKeys": {
         "suggested_cart_items_id": {
           "name": "suggested_cart_items_id",
-          "columns": [
-            "id"
-          ]
+          "columns": ["id"]
         }
       },
       "uniqueConstraints": {},
@@ -1457,9 +1381,7 @@
       "compositePrimaryKeys": {
         "swiggy_tokens_user_id": {
           "name": "swiggy_tokens_user_id",
-          "columns": [
-            "user_id"
-          ]
+          "columns": ["user_id"]
         }
       },
       "uniqueConstraints": {},
@@ -1529,10 +1451,7 @@
       "indexes": {
         "householdCreatedIdx": {
           "name": "householdCreatedIdx",
-          "columns": [
-            "household_id",
-            "created_at"
-          ],
+          "columns": ["household_id", "created_at"],
           "isUnique": false
         }
       },
@@ -1540,9 +1459,7 @@
       "compositePrimaryKeys": {
         "system_events_id": {
           "name": "system_events_id",
-          "columns": [
-            "id"
-          ]
+          "columns": ["id"]
         }
       },
       "uniqueConstraints": {},
@@ -1591,9 +1508,7 @@
       "indexes": {
         "clerkIdx": {
           "name": "clerkIdx",
-          "columns": [
-            "clerk_user_id"
-          ],
+          "columns": ["clerk_user_id"],
           "isUnique": true
         }
       },
@@ -1601,9 +1516,7 @@
       "compositePrimaryKeys": {
         "users_id": {
           "name": "users_id",
-          "columns": [
-            "id"
-          ]
+          "columns": ["id"]
         }
       },
       "uniqueConstraints": {},
@@ -1654,9 +1567,7 @@
       "compositePrimaryKeys": {
         "voice_transcripts_message_id": {
           "name": "voice_transcripts_message_id",
-          "columns": [
-            "message_id"
-          ]
+          "columns": ["message_id"]
         }
       },
       "uniqueConstraints": {},

@@ -177,9 +177,7 @@ export function useHouseholdChat(householdId: string, ownMembershipId: string | 
   const [error, setError] = useState<string | null>(null);
   // The latest private action suggestion for the author (ticket 08, AC#3).
   // Private to the author; never rendered for other participants.
-  const [pendingSuggestion, setPendingSuggestion] = useState<ActionSuggestionResponse | null>(
-    null,
-  );
+  const [pendingSuggestion, setPendingSuggestion] = useState<ActionSuggestionResponse | null>(null);
   const newestIdRef = useRef<string | null>(null);
   // Stable refs for the media upload fetch (which sends raw bytes, not JSON).
   const useAuthRef = useRef({ getToken });

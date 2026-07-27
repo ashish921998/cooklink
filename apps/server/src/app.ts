@@ -1050,6 +1050,31 @@ export function createApp(db: Database, services?: AppServices) {
           throw new InviteAlreadyConsumedError();
         }
 
+        // Serialize the Cook-limit checks that the single-use invite lock
+        // cannot reach: two different cook invites into the same household,
+        // or one cook accepting into several households at once. Locking the
+        // household row serializes the per-household two-Cook budget; locking
+        // the accepting user's row serializes the per-Cook 30-Household
+        // budget. The locks are acquired in a fixed order (household then
+        // user) so the lock graph stays acyclic, and every acceptance path
+        // takes both, so any two acceptances touching the same household or
+        // the same user commit one after the other. With both held, the
+        // count re-checks below see a stable view — no other acceptance for
+        // this household or this user can commit until this transaction ends
+        // (issue 03 — serialize Cook-limit enforcement safely).
+        await tx
+          .select({ id: households.id })
+          .from(households)
+          .where(eq(households.id, invite.householdId))
+          .for('update')
+          .limit(1);
+        await tx
+          .select({ id: users.id })
+          .from(users)
+          .where(eq(users.id, user.id))
+          .for('update')
+          .limit(1);
+
         // Re-check the limits INSIDE the transaction so concurrent
         // acceptances of different invites cannot both pass. The counts are
         // read after the invite lock, narrowing the race window. The unique
@@ -3369,10 +3394,7 @@ export function createApp(db: Database, services?: AppServices) {
       .select()
       .from(deviceRegistrations)
       .where(
-        and(
-          eq(deviceRegistrations.userId, user.id),
-          isNull(deviceRegistrations.invalidatedAt),
-        ),
+        and(eq(deviceRegistrations.userId, user.id), isNull(deviceRegistrations.invalidatedAt)),
       );
     return c.json({
       devices: rows.map((row) => ({
@@ -3393,9 +3415,7 @@ export function createApp(db: Database, services?: AppServices) {
     await db
       .update(deviceRegistrations)
       .set({ invalidatedAt: new Date() })
-      .where(
-        and(eq(deviceRegistrations.id, deviceId), eq(deviceRegistrations.userId, user.id)),
-      );
+      .where(and(eq(deviceRegistrations.id, deviceId), eq(deviceRegistrations.userId, user.id)));
     return c.json({ ok: true });
   });
   /**
@@ -3428,10 +3448,7 @@ export function createApp(db: Database, services?: AppServices) {
         .select({ value: count() })
         .from(chatMessages)
         .where(
-          and(
-            eq(chatMessages.householdId, principal.householdId),
-            isNull(chatMessages.deletedAt),
-          ),
+          and(eq(chatMessages.householdId, principal.householdId), isNull(chatMessages.deletedAt)),
         );
       unreadCount = Number(agg?.value ?? 0);
     } else {
@@ -3941,9 +3958,20 @@ async function gatherPushInput(
   db: Database,
   householdId: string,
 ): Promise<{
-  members: { id: string; userId: string; role: string; status: string; notificationDefault: string }[];
+  members: {
+    id: string;
+    userId: string;
+    role: string;
+    status: string;
+    notificationDefault: string;
+  }[];
   memberStates: { userId: string; householdId: string; notificationOverride: string | null }[];
-  devices: { pushToken: string; userId: string; hidePreviews: boolean; invalidatedAt: Date | null }[];
+  devices: {
+    pushToken: string;
+    userId: string;
+    hidePreviews: boolean;
+    invalidatedAt: Date | null;
+  }[];
 }> {
   const memberRows = await db
     .select()

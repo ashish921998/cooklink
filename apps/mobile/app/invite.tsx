@@ -1,0 +1,46 @@
+import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useUser } from '@clerk/clerk-expo';
+import { AcceptInvite } from '../src/screens/AcceptInvite';
+import { Loading } from '../src/components/ui';
+
+/**
+ * The deep-link entry for invite acceptance (issue 03). A WhatsApp message
+ * carries a `cooklink://invite?token=...` link; tapping it opens this route
+ * with the token pre-filled so the recipient can accept in one tap.
+ *
+ * The route also serves the manual "I have an invite" path from the
+ * no-households screen, in which case `token` is empty and the person pastes
+ * it themselves.
+ *
+ * A not-yet-signed-in visitor is redirected to the home route's phone-OTP
+ * flow, but the invite token is preserved as a `pending_invite_token` query
+ * parameter so that after OTP verification the home route redirects back
+ * here with the token still in hand. The recipient never has to re-tap the
+ * WhatsApp link (the invite is single-use and seven-day, so this is safe).
+ */
+export default function InviteRoute() {
+  const { isLoaded, isSignedIn } = useUser();
+  const router = useRouter();
+  const params = useLocalSearchParams<{ token?: string | string[] }>();
+
+  if (!isLoaded) return <Loading />;
+
+  const raw = params.token;
+  const prefillToken = Array.isArray(raw) ? (raw[0] ?? '') : (raw ?? '');
+
+  if (!isSignedIn) {
+    const target = prefillToken
+      ? `/?pending_invite_token=${encodeURIComponent(prefillToken)}`
+      : '/';
+    router.replace(target);
+    return <Loading />;
+  }
+
+  return (
+    <AcceptInvite
+      prefillToken={prefillToken}
+      onAccepted={() => router.replace('/')}
+      onCancel={() => router.replace('/')}
+    />
+  );
+}
