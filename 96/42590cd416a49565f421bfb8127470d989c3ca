@@ -1,0 +1,28 @@
+apps/mobile/app/index.tsx
+  s_6100549eab9a8a::t_242a7e7160ce20 348-350
+  s_6100549eab9a8a::t_5b04e4ce35ab05 304,333-346,352-365
+  s_6100549eab9a8a::t_f5fa40e4a39438 539
+apps/server/src/app.ts
+  s_6100549eab9a8a::t_2be9718a82f803 2,98-99
+  s_6100549eab9a8a::t_242a7e7160ce20 341
+  s_6100549eab9a8a::t_fcfcde056c3567 138-141,143,149,154-158,160-161
+  s_6100549eab9a8a::t_ff577ee03bbb48 339-340,342-363
+apps/server/src/tests/app.test.ts
+  s_6100549eab9a8a::t_655c84abc0aff5 4-5,15-70
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "9642590cd416a49565f421bfb8127470d989c3ca",
+  "prompts": {},
+  "sessions": {
+    "s_6100549eab9a8a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fa1e9-c920-7831-812c-37fcafdb1eb2",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Ashish Huddar <ashish.hudar@gmail.com>"
+    }
+  }
+}
