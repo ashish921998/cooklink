@@ -1,7 +1,7 @@
+import { PROVIDER_SECRET_PATTERN } from './provider-secrets.js';
+
 const publicEnv = Object.entries(process.env).filter(([key]) => key.startsWith('EXPO_PUBLIC_'));
-const leaked = publicEnv.filter(([key]) =>
-  /CLERK_SECRET|DATABASE_URL|SWIGGY|ELEVEN|OPENAI|TOKEN|SECRET/i.test(key),
-);
+const leaked = publicEnv.filter(([key]) => PROVIDER_SECRET_PATTERN.test(key));
 
 if (leaked.length > 0) {
   console.error(

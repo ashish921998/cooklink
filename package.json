@@ -17,7 +17,8 @@
     "db:generate": "pnpm --filter @cooklink/db generate",
     "db:migrate": "pnpm --filter @cooklink/db migrate",
     "db:seed": "pnpm --filter @cooklink/db seed",
-    "secrets:check": "pnpm --filter @cooklink/server secrets:check"
+    "secrets:check": "pnpm --filter @cooklink/server secrets:check",
+    "secrets:grep": "pnpm --filter @cooklink/server secrets:grep"
   },
   "devDependencies": {
     "@eslint/js": "^9.14.0",

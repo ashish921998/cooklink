@@ -2,7 +2,6 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { and, asc, count, desc, eq, inArray, isNull } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { logger } from 'hono/logger';
 import {
   Authorization,
   AuthorizationDeniedError,
@@ -54,12 +53,17 @@ import {
 import { validateMembershipRemoval } from './membership-lifecycle.js';
 import { createMediaStore, type MediaKind, type MediaStore } from './media.js';
 import { createTranscriptionService, type TranscriptionService } from './transcription.js';
+import { createLogger, requestLogger, logAuthorizationDenied } from './logger.js';
+import { captureError } from './observability.js';
+import type { Logger } from 'pino';
 
 type HouseholdRoleInvite = 'member' | 'cook';
 
 export interface AppServices {
   media?: MediaStore;
   transcription?: TranscriptionService;
+  /** Inject a logger (e.g. a silenced Pino instance in tests). */
+  log?: Logger;
 }
 
 /** Thrown inside the swap transaction so a stale side rolls back both writes. */
@@ -91,8 +95,8 @@ export function createApp(db: Database, services?: AppServices) {
   const authorization = new Authorization(new DrizzleAuthorizationLookup(db));
   const media = services?.media ?? createMediaStore();
   const transcription = services?.transcription ?? createTranscriptionService();
+  const log = services?.log ?? createLogger();
 
-  app.use('*', logger());
   app.use(
     '*',
     cors({
@@ -106,6 +110,13 @@ export function createApp(db: Database, services?: AppServices) {
       ],
     }),
   );
+
+  // Structured request logging covers every request, including /health
+  // (issue 07, AC#19 — "every request logs user, Household, route, latency,
+  // and status"). The middleware reads `authUser` after `await next()`, so it
+  // still captures the authenticated user for /v1/* routes even though auth
+  // runs deeper in the chain; /health logs with a null user.
+  app.use('*', requestLogger(log));
 
   app.get('/health', (c) => c.json({ ok: true, service: 'cooklink-server' }));
 
@@ -414,10 +425,7 @@ export function createApp(db: Database, services?: AppServices) {
         .select()
         .from(plannedMeals)
         .where(
-          and(
-            eq(plannedMeals.id, failedId),
-            eq(plannedMeals.householdId, principal.householdId),
-          ),
+          and(eq(plannedMeals.id, failedId), eq(plannedMeals.householdId, principal.householdId)),
         )
         .limit(1);
       return c.json(
@@ -658,7 +666,11 @@ export function createApp(db: Database, services?: AppServices) {
       });
     }
     return c.json(
-      { householdId: setupResult.householdId, planStart: setupResult.planStart, mealCount: setupResult.mealCount },
+      {
+        householdId: setupResult.householdId,
+        planStart: setupResult.planStart,
+        mealCount: setupResult.mealCount,
+      },
       201,
     );
   });
@@ -1651,10 +1663,22 @@ export function createApp(db: Database, services?: AppServices) {
 
   app.onError((err, c) => {
     if (err instanceof AuthorizationDeniedError) {
-      console.warn('authorization_denied', err.detail);
+      // Structured authorization-denial log (issue 07, AC#5 / AC#19). Denials
+      // return 404 so a non-member cannot probe which Household ids exist.
+      logAuthorizationDenied(log, {
+        userId: c.get('authUser')?.id,
+        householdId: c.req.param('householdId'),
+        capability: err.detail.capability,
+        message: err.message,
+      });
       return c.json({ error: 'not_found' }, 404);
     }
-    console.error(err);
+    log.error({ msg: 'unhandled_error', err });
+    captureError(err, {
+      route: c.req.path,
+      method: c.req.method,
+      userId: c.get('authUser')?.id ?? null,
+    });
     return c.json({ error: 'internal_error' }, 500);
   });
 

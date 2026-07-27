@@ -47,6 +47,12 @@ export interface MediaStore {
   resolve(mediaRef: string, householdId: string): Promise<ResolvedMedia | null>;
   /** Schedule deletion of a media object (issue 06 — delete revokes access). */
   delete(mediaRef: string): Promise<void>;
+  /**
+   * Optional TTL sweep hook (issue 07, AC#17/AC#18). A production R2 store
+   * purges orphaned/expired objects (e.g. TTS audio at 90 days); the in-memory
+   * store leaves this unimplemented so the scheduler job is a no-op.
+   */
+  sweepTtl?(now: Date): Promise<{ affected: number }>;
 }
 
 /**

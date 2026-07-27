@@ -11,7 +11,8 @@
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
     "test": "node --import tsx --test \"src/**/*.test.ts\"",
-    "secrets:check": "node --import tsx src/secrets-check.ts"
+    "secrets:check": "node --import tsx src/secrets-check.ts",
+    "secrets:grep": "node --import tsx src/secrets-grep.ts"
   },
   "dependencies": {
     "@clerk/backend": "^1.23.7",
@@ -20,7 +21,8 @@
     "@hono/node-server": "^1.13.7",
     "drizzle-orm": "^0.36.4",
     "hono": "^4.6.10",
-    "mysql2": "^3.11.5"
+    "mysql2": "^3.11.5",
+    "pino": "^10.3.1"
   },
   "devDependencies": {
     "@types/node": "^22.9.0",
