@@ -1,0 +1,56 @@
+apps/server/src/app.ts
+  s_51a4f5cfee08f9::t_1d12a4dfac4f8f 576-619,639-644,646-663
+  s_51a4f5cfee08f9::t_f02b1ea0bdf4bf 1012-1023
+  s_51a4f5cfee08f9::t_8ae851349a5251 877-958,960-974
+  s_51a4f5cfee08f9::t_9c71d5dae48ea6 138
+  s_51a4f5cfee08f9::t_15b8314af45e95 65-72
+  s_51a4f5cfee08f9::t_af9e4e08e56786 376-400,402-426
+  s_51a4f5cfee08f9::t_5f8fb3a78070d6 73-88
+packages/db/src/schema.ts
+  s_51a4f5cfee08f9::t_6517c641e7647c 85-93
+apps/mobile/src/screens/CookShell.tsx
+  s_51a4f5cfee08f9::t_382d5d831a7268 46-54
+apps/mobile/src/lib/households.ts
+  s_51a4f5cfee08f9::t_773be7e85fff9a 31,33-34
+  s_51a4f5cfee08f9::t_d79deff250a2b8 20
+  s_51a4f5cfee08f9::t_117124a074afde 51-58
+apps/mobile/src/screens/MemberShell.tsx
+  s_51a4f5cfee08f9::t_ac778a7a00d247 2
+  s_51a4f5cfee08f9::t_247869d56dcc97 164-189,199,212,214-222
+apps/mobile/src/screens/MealPlan.tsx
+  s_51a4f5cfee08f9::t_7d5235ae577798 151
+  s_51a4f5cfee08f9::t_aa4d010aff72fa 1,4-5,9-15,17-103,106-107,109-111,114,116-124,127-130,134-148,150,152-156,158-179,181-203,205-232,234-236,240,243-260,263,268-277,281-292,297-337,341-683
+  s_51a4f5cfee08f9::t_9870c5936b3941 149
+  s_51a4f5cfee08f9::t_c70c6077028899 157
+  s_51a4f5cfee08f9::t_ac98e5425897fe 204
+  s_51a4f5cfee08f9::t_117cb53bfd9388 2
+  s_51a4f5cfee08f9::t_634ee61da3d7a0 112
+  s_51a4f5cfee08f9::t_cf01db997376a5 180
+apps/mobile/src/screens/Chat.tsx
+  s_51a4f5cfee08f9::t_c80b4afa917e9d 141-145
+  s_51a4f5cfee08f9::t_a3ad9da8bca277 1
+  s_51a4f5cfee08f9::t_cb2511d45b0193 54-58,60,67-85
+  s_51a4f5cfee08f9::t_9293abdb8785bb 86
+packages/db/migrations/0001_soft_komodo.sql
+  s_51a4f5cfee08f9::t_4ba8f1f86a71eb 1-2
+packages/db/migrations/meta/0001_snapshot.json
+  s_51a4f5cfee08f9::t_c4a970c4eb71ee 1-1676
+packages/db/migrations/meta/_journal.json
+  s_51a4f5cfee08f9::t_abac85fab9bb09 11-17,20
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "81a6294a4342b93ef8b29667b0e64bf915af978c",
+  "prompts": {},
+  "sessions": {
+    "s_51a4f5cfee08f9": {
+      "agent_id": {
+        "tool": "droid",
+        "id": "f9323d3b-e32a-49c7-a1d4-a0cfad9c0c93",
+        "model": "glm-5.2"
+      },
+      "human_author": "Ashish Huddar <ashish.hudar@gmail.com>"
+    }
+  }
+}
