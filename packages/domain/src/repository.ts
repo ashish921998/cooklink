@@ -27,6 +27,7 @@ import type {
   VoiceTranscript,
   GroceryRequest,
 } from './types.js';
+import type { ProductMatch } from './provider.js';
 
 /**
  * The repository port. Every household-scoped method takes `householdId` as
@@ -214,4 +215,20 @@ export interface Repository extends AuthorizationLookup {
   ): Promise<GroceryOrder>;
   getOrder(id: GroceryOrderId | string): Promise<GroceryOrder | null>;
   listOrders(householdId: HouseholdId): Promise<GroceryOrder[]>;
+
+  // ---- product matches (issue 10) ----
+  /**
+   * Load all product matches for a Household's current Suggested Grocery Cart.
+   * Each match links a cart line to an exact Instamart product the Member chose.
+   */
+  getProductMatches(householdId: HouseholdId): Promise<ProductMatch[]>;
+  /**
+   * Persist (or replace) a Member's exact product choice for one cart line
+   * (AC#3 — a vague need stays unresolved until a product is chosen).
+   */
+  upsertProductMatch(match: ProductMatch): Promise<ProductMatch>;
+  /** Remove a product match (e.g. when the cart is rebuilt or a match is cleared). */
+  clearProductMatch(householdId: HouseholdId, cartItemId: string): Promise<void>;
+  /** Remove all product matches for a Household (used on cart rebuild). */
+  clearProductMatches(householdId: HouseholdId): Promise<void>;
 }

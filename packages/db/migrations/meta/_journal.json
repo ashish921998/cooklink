@@ -15,6 +15,13 @@
       "when": 1785136453035,
       "tag": "0001_soft_komodo",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1785143741136,
+      "tag": "0002_noisy_nomad",
+      "breakpoints": true
     }
   ]
 }

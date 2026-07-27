@@ -251,6 +251,32 @@ export const groceryOrders = mysqlTable(
   (t) => ({ householdIdx: index('householdIdx').on(t.householdId) }),
 );
 
+/**
+ * A Member's chosen exact Instamart product for one Suggested Grocery Cart
+ * line (issue 10, AC#3). A vague need stays unresolved until a product is
+ * chosen. The product snapshot is stored as JSON so the review can show the
+ * exact brand/variant/pack/price at selection time even if the provider's
+ * catalog later changes.
+ */
+export const productMatches = mysqlTable(
+  'product_matches',
+  {
+    id: id(),
+    householdId: char('household_id', { length: 36 }).notNull(),
+    cartItemId: varchar('cart_item_id', { length: 128 }).notNull(),
+    productId: varchar('product_id', { length: 128 }).notNull(),
+    addressId: varchar('address_id', { length: 128 }).notNull(),
+    quantity: int('quantity').notNull().default(1),
+    product: json('product').$type<unknown>().notNull(),
+    selectedById: char('selected_by_id', { length: 36 }).notNull(),
+    selectedAt: now(),
+  },
+  (t) => ({
+    householdCartIdx: uniqueIndex('householdCartIdx').on(t.householdId, t.cartItemId),
+    householdIdx: index('productMatchHouseholdIdx').on(t.householdId),
+  }),
+);
+
 // ---- chat ----
 
 export const chatMessages = mysqlTable(

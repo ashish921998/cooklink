@@ -37,6 +37,17 @@ import {
   type PlannedMeal,
   type SuggestedCartItem,
   type SystemEventType,
+  type GroceryProvider,
+  type ProductMatch,
+  type ProviderProduct,
+  type ProviderCartReview,
+  type ProviderCartItem,
+  resolveMatchPlan,
+  buildCartUpdatePlan,
+  validateCartReview,
+  allResolved,
+  searchQueryFor,
+  ProviderError,
 } from '@cooklink/domain';
 import {
   actionSuggestions,
@@ -70,6 +81,7 @@ import { createMediaStore, type MediaKind, type MediaStore } from './media.js';
 import { createTranscriptionService, type TranscriptionService } from './transcription.js';
 import { createLogger, requestLogger, logAuthorizationDenied } from './logger.js';
 import { captureError } from './observability.js';
+import { createStubProvider } from './provider-stub.js';
 import type { Logger } from 'pino';
 
 type HouseholdRoleInvite = 'member' | 'cook';
@@ -79,6 +91,12 @@ export interface AppServices {
   transcription?: TranscriptionService;
   /** Inject a logger (e.g. a silenced Pino instance in tests). */
   log?: Logger;
+  /**
+   * The Instamart/Swiggy grocery provider (issue 10). Defaults to a local
+   * stub so the complete product-matching journey is testable without
+   * production credentials (AC#8).
+   */
+  provider?: GroceryProvider;
 }
 
 /** Thrown inside the swap transaction so a stale side rolls back both writes. */
@@ -111,6 +129,7 @@ export function createApp(db: Database, services?: AppServices) {
   const media = services?.media ?? createMediaStore();
   const transcription = services?.transcription ?? createTranscriptionService();
   const log = services?.log ?? createLogger();
+  const provider = services?.provider ?? createStubProvider();
 
   app.use(
     '*',
@@ -1719,226 +1738,215 @@ export function createApp(db: Database, services?: AppServices) {
    * new request; `updateQuantity: true` updates the similar request's
    * quantity.
    */
-  app.post(
-    '/v1/households/:householdId/chat/suggestions/:suggestionId/confirm',
-    async (c) => {
-      const user = c.get('authUser');
-      const householdId = c.req.param('householdId');
-      const principal = await authorization.authorize(
-        id<'UserId'>(user.id),
-        id<'HouseholdId'>(householdId),
-      );
-      const suggestionId = c.req.param('suggestionId');
-      const [suggestionRow] = await db
+  app.post('/v1/households/:householdId/chat/suggestions/:suggestionId/confirm', async (c) => {
+    const user = c.get('authUser');
+    const householdId = c.req.param('householdId');
+    const principal = await authorization.authorize(
+      id<'UserId'>(user.id),
+      id<'HouseholdId'>(householdId),
+    );
+    const suggestionId = c.req.param('suggestionId');
+    const [suggestionRow] = await db
+      .select()
+      .from(actionSuggestions)
+      .where(eq(actionSuggestions.id, suggestionId))
+      .limit(1);
+    if (
+      !suggestionRow ||
+      suggestionRow.householdId !== principal.householdId ||
+      suggestionRow.authorId !== principal.membershipId
+    ) {
+      // A suggestion is private to its author (AC#3); a non-author (even a
+      // member of the same Household) gets a generic not-found.
+      return c.json({ error: 'not_found' }, 404);
+    }
+
+    const body: {
+      keepSeparate?: boolean;
+      updateQuantity?: boolean;
+      quantity?: string | null;
+    } = await c.req.json().catch(() => ({}));
+    const [householdRow] = await db
+      .select()
+      .from(households)
+      .where(eq(households.id, principal.householdId))
+      .limit(1);
+    const language: Language = householdRow?.defaultLanguage ?? 'en';
+    const intent = suggestionRow.intent as ChatIntent;
+    const decision = decideGrocerySuggestion({
+      intent,
+      role: principal.role,
+      language,
+      suggestion: {
+        status: suggestionRow.status as ActionSuggestion['status'],
+        expiresAt: suggestionRow.expiresAt.toISOString(),
+      },
+      now: new Date(),
+    });
+    if (!decision.ok) {
+      if (decision.reason === 'missing_item') {
+        // AC#2 — one plain follow-up question, not a form.
+        return c.json({ error: 'missing_item', followUp: decision.followUp }, 422);
+      }
+      if (decision.reason === 'suggestion_expired') {
+        await db
+          .update(actionSuggestions)
+          .set({ status: 'expired' })
+          .where(eq(actionSuggestions.id, suggestionId));
+      }
+      return c.json({ error: decision.reason }, 409);
+    }
+
+    // AC#5 — similarity check at commit for Cook grocery requests.
+    if (decision.action === 'create_grocery_request') {
+      const pendingRows = await db
         .select()
-        .from(actionSuggestions)
-        .where(eq(actionSuggestions.id, suggestionId))
-        .limit(1);
-      if (
-        !suggestionRow ||
-        suggestionRow.householdId !== principal.householdId ||
-        suggestionRow.authorId !== principal.membershipId
-      ) {
-        // A suggestion is private to its author (AC#3); a non-author (even a
-        // member of the same Household) gets a generic not-found.
-        return c.json({ error: 'not_found' }, 404);
+        .from(groceryRequests)
+        .where(
+          and(
+            eq(groceryRequests.householdId, principal.householdId),
+            eq(groceryRequests.status, 'pending'),
+          ),
+        );
+      const pendingDomain = pendingRows.map(toDomainGroceryRequest);
+      const similar = findSimilarPendingRequest(pendingDomain, decision.item);
+      if (similar && !body.keepSeparate) {
+        if (body.updateQuantity) {
+          // Update the existing similar request's quantity (Cook edit on a
+          // pending request; either active Cook may do this — AC#6). When no
+          // explicit quantity is supplied, preserve the existing one rather
+          // than clearing it.
+          const nextQuantity =
+            body.quantity !== undefined
+              ? body.quantity
+              : (decision.quantity ?? similar.quantityText);
+          const updateDecision = decideRequestUpdate({
+            current: similar,
+            expectedVersion: similar.version,
+            patch: { quantityText: nextQuantity },
+            now: new Date(),
+          });
+          if (!updateDecision.ok) {
+            return c.json(
+              { error: 'similar_conflict', similar: serializeGroceryRequest(similar) },
+              409,
+            );
+          }
+          const updated = await db.transaction(async (tx) => {
+            await tx
+              .update(groceryRequests)
+              .set({
+                quantityText: updateDecision.next.quantityText,
+                version: updateDecision.next.version,
+              })
+              .where(eq(groceryRequests.id, similar.id as string));
+            await tx.insert(systemEvents).values({
+              id: randomUUID(),
+              householdId: principal.householdId,
+              type: 'grocery_request.updated',
+              actorId: principal.membershipId,
+              entityType: 'grocery_request',
+              entityId: similar.id as string,
+              payload: {
+                item: updateDecision.next.itemText,
+                quantity: updateDecision.next.quantityText,
+                status: 'pending',
+              },
+            });
+            const [row] = await tx
+              .select()
+              .from(groceryRequests)
+              .where(eq(groceryRequests.id, similar.id as string))
+              .limit(1);
+            return row;
+          });
+          await markSuggestionStatus(db, principal.householdId, suggestionId, 'confirmed');
+          return c.json({
+            request: serializeGroceryRequest(toDomainGroceryRequest(updated!)),
+            updatedExisting: true,
+          });
+        }
+        // Surface the deliberate choice; never silently merge (AC#5).
+        return c.json({ error: 'similar_exists', similar: serializeGroceryRequest(similar) }, 409);
       }
 
-      const body: {
-        keepSeparate?: boolean;
-        updateQuantity?: boolean;
-        quantity?: string | null;
-      } = await c.req.json().catch(() => ({}));
-      const [householdRow] = await db
-        .select()
-        .from(households)
-        .where(eq(households.id, principal.householdId))
-        .limit(1);
-      const language: Language = householdRow?.defaultLanguage ?? 'en';
-      const intent = suggestionRow.intent as ChatIntent;
-      const decision = decideGrocerySuggestion({
-        intent,
-        role: principal.role,
-        language,
-        suggestion: {
-          status: suggestionRow.status as ActionSuggestion['status'],
-          expiresAt: suggestionRow.expiresAt.toISOString(),
-        },
-        now: new Date(),
-      });
-      if (!decision.ok) {
-        if (decision.reason === 'missing_item') {
-          // AC#2 — one plain follow-up question, not a form.
-          return c.json({ error: 'missing_item', followUp: decision.followUp }, 422);
-        }
-        if (decision.reason === 'suggestion_expired') {
-          await db
-            .update(actionSuggestions)
-            .set({ status: 'expired' })
-            .where(eq(actionSuggestions.id, suggestionId));
-        }
-        return c.json({ error: decision.reason }, 409);
-      }
-
-      // AC#5 — similarity check at commit for Cook grocery requests.
-      if (decision.action === 'create_grocery_request') {
-        const pendingRows = await db
+      // No similar pending request (or the author chose Keep separate):
+      // create a new pending Grocery Request + attributed Chat event.
+      const requestId = randomUUID();
+      const [created] = await db.transaction(async (tx) => {
+        await tx.insert(groceryRequests).values({
+          id: requestId,
+          householdId: principal.householdId,
+          itemText: decision.item,
+          quantityText: decision.quantity,
+          createdById: principal.membershipId,
+        });
+        await tx.insert(systemEvents).values({
+          id: randomUUID(),
+          householdId: principal.householdId,
+          type: 'grocery_request.created',
+          actorId: principal.membershipId,
+          entityType: 'grocery_request',
+          entityId: requestId,
+          payload: { item: decision.item, quantity: decision.quantity, status: 'pending' },
+        });
+        const [row] = await tx
           .select()
           .from(groceryRequests)
-          .where(
-            and(
-              eq(groceryRequests.householdId, principal.householdId),
-              eq(groceryRequests.status, 'pending'),
-            ),
-          );
-        const pendingDomain = pendingRows.map(toDomainGroceryRequest);
-        const similar = findSimilarPendingRequest(pendingDomain, decision.item);
-        if (similar && !body.keepSeparate) {
-          if (body.updateQuantity) {
-            // Update the existing similar request's quantity (Cook edit on a
-            // pending request; either active Cook may do this — AC#6). When no
-            // explicit quantity is supplied, preserve the existing one rather
-            // than clearing it.
-            const nextQuantity =
-              body.quantity !== undefined
-                ? body.quantity
-                : (decision.quantity ?? similar.quantityText);
-            const updateDecision = decideRequestUpdate({
-              current: similar,
-              expectedVersion: similar.version,
-              patch: { quantityText: nextQuantity },
-              now: new Date(),
-            });
-            if (!updateDecision.ok) {
-              return c.json(
-                { error: 'similar_conflict', similar: serializeGroceryRequest(similar) },
-                409,
-              );
-            }
-            const updated = await db.transaction(async (tx) => {
-              await tx
-                .update(groceryRequests)
-                .set({
-                  quantityText: updateDecision.next.quantityText,
-                  version: updateDecision.next.version,
-                })
-                .where(eq(groceryRequests.id, similar.id as string));
-              await tx.insert(systemEvents).values({
-                id: randomUUID(),
-                householdId: principal.householdId,
-                type: 'grocery_request.updated',
-                actorId: principal.membershipId,
-                entityType: 'grocery_request',
-                entityId: similar.id as string,
-                payload: {
-                  item: updateDecision.next.itemText,
-                  quantity: updateDecision.next.quantityText,
-                  status: 'pending',
-                },
-              });
-              const [row] = await tx
-                .select()
-                .from(groceryRequests)
-                .where(eq(groceryRequests.id, similar.id as string))
-                .limit(1);
-              return row;
-            });
-            await markSuggestionStatus(db, principal.householdId, suggestionId, 'confirmed');
-            return c.json({
-              request: serializeGroceryRequest(toDomainGroceryRequest(updated!)),
-              updatedExisting: true,
-            });
-          }
-          // Surface the deliberate choice; never silently merge (AC#5).
-          return c.json(
-            { error: 'similar_exists', similar: serializeGroceryRequest(similar) },
-            409,
-          );
-        }
-
-        // No similar pending request (or the author chose Keep separate):
-        // create a new pending Grocery Request + attributed Chat event.
-        const requestId = randomUUID();
-        const [created] = await db.transaction(async (tx) => {
-          await tx.insert(groceryRequests).values({
-            id: requestId,
-            householdId: principal.householdId,
-            itemText: decision.item,
-            quantityText: decision.quantity,
-            createdById: principal.membershipId,
-          });
-          await tx.insert(systemEvents).values({
-            id: randomUUID(),
-            householdId: principal.householdId,
-            type: 'grocery_request.created',
-            actorId: principal.membershipId,
-            entityType: 'grocery_request',
-            entityId: requestId,
-            payload: { item: decision.item, quantity: decision.quantity, status: 'pending' },
-          });
-          const [row] = await tx
-            .select()
-            .from(groceryRequests)
-            .where(eq(groceryRequests.id, requestId))
-            .limit(1);
-          return [row];
-        });
-        await markSuggestionStatus(db, principal.householdId, suggestionId, 'confirmed');
-        return c.json({ request: serializeGroceryRequest(toDomainGroceryRequest(created!)) }, 201);
-      }
-
-      // Member/Owner → add a Suggested Grocery Cart item for review. This
-      // never places an order or bypasses Groceries review (AC#8).
-      const cartItemId = `${principal.householdId}:request:${suggestionId}`;
-      await db
-        .insert(suggestedCartItems)
-        .values({
-          id: cartItemId,
-          householdId: principal.householdId,
-          ingredientKey: null,
-          groceryRequestId: null,
-          freeTextItem: decision.item.slice(0, 256),
-          needDay: 'today',
-          affectedMeals: [],
-          confidence: 'unknown',
-          memberState: 'pending',
-          removalReason: null,
-        });
+          .where(eq(groceryRequests.id, requestId))
+          .limit(1);
+        return [row];
+      });
       await markSuggestionStatus(db, principal.householdId, suggestionId, 'confirmed');
-      return c.json({ cartItemId, item: decision.item }, 201);
-    },
-  );
+      return c.json({ request: serializeGroceryRequest(toDomainGroceryRequest(created!)) }, 201);
+    }
+
+    // Member/Owner → add a Suggested Grocery Cart item for review. This
+    // never places an order or bypasses Groceries review (AC#8).
+    const cartItemId = `${principal.householdId}:request:${suggestionId}`;
+    await db.insert(suggestedCartItems).values({
+      id: cartItemId,
+      householdId: principal.householdId,
+      ingredientKey: null,
+      groceryRequestId: null,
+      freeTextItem: decision.item.slice(0, 256),
+      needDay: 'today',
+      affectedMeals: [],
+      confidence: 'unknown',
+      memberState: 'pending',
+      removalReason: null,
+    });
+    await markSuggestionStatus(db, principal.householdId, suggestionId, 'confirmed');
+    return c.json({ cartItemId, item: decision.item }, 201);
+  });
 
   /** Dismiss a private action suggestion (AC#3 — the author may dismiss). */
-  app.post(
-    '/v1/households/:householdId/chat/suggestions/:suggestionId/dismiss',
-    async (c) => {
-      const user = c.get('authUser');
-      const householdId = c.req.param('householdId');
-      const principal = await authorization.authorize(
-        id<'UserId'>(user.id),
-        id<'HouseholdId'>(householdId),
-      );
-      const suggestionId = c.req.param('suggestionId');
-      const [suggestionRow] = await db
-        .select()
-        .from(actionSuggestions)
-        .where(eq(actionSuggestions.id, suggestionId))
-        .limit(1);
-      if (
-        !suggestionRow ||
-        suggestionRow.householdId !== principal.householdId ||
-        suggestionRow.authorId !== principal.membershipId
-      ) {
-        return c.json({ error: 'not_found' }, 404);
-      }
-      await db
-        .update(actionSuggestions)
-        .set({ status: 'dismissed' })
-        .where(eq(actionSuggestions.id, suggestionId));
-      return c.json({ ok: true });
-    },
-  );
+  app.post('/v1/households/:householdId/chat/suggestions/:suggestionId/dismiss', async (c) => {
+    const user = c.get('authUser');
+    const householdId = c.req.param('householdId');
+    const principal = await authorization.authorize(
+      id<'UserId'>(user.id),
+      id<'HouseholdId'>(householdId),
+    );
+    const suggestionId = c.req.param('suggestionId');
+    const [suggestionRow] = await db
+      .select()
+      .from(actionSuggestions)
+      .where(eq(actionSuggestions.id, suggestionId))
+      .limit(1);
+    if (
+      !suggestionRow ||
+      suggestionRow.householdId !== principal.householdId ||
+      suggestionRow.authorId !== principal.membershipId
+    ) {
+      return c.json({ error: 'not_found' }, 404);
+    }
+    await db
+      .update(actionSuggestions)
+      .set({ status: 'dismissed' })
+      .where(eq(actionSuggestions.id, suggestionId));
+    return c.json({ ok: true });
+  });
 
   /**
    * List the caller's own pending private suggestions, so they survive app
@@ -2003,7 +2011,9 @@ export function createApp(db: Database, services?: AppServices) {
           : eq(groceryRequests.householdId, principal.householdId),
       )
       .orderBy(desc(groceryRequests.createdAt));
-    return c.json({ requests: rows.map((r) => serializeGroceryRequest(toDomainGroceryRequest(r))) });
+    return c.json({
+      requests: rows.map((r) => serializeGroceryRequest(toDomainGroceryRequest(r))),
+    });
   });
 
   /**
@@ -2059,9 +2069,7 @@ export function createApp(db: Database, services?: AppServices) {
         .from(groceryRequests)
         .where(eq(groceryRequests.id, requestId))
         .limit(1);
-      const actor = fresh
-        ? await latestRequestActor(db, principal.householdId, requestId)
-        : null;
+      const actor = fresh ? await latestRequestActor(db, principal.householdId, requestId) : null;
       return c.json(
         {
           error: decision.reason,
@@ -2116,104 +2124,471 @@ export function createApp(db: Database, services?: AppServices) {
    * approval nor "order now" places an order — exact product matching, cart
    * review, and fresh checkout confirmation remain in Groceries (AC#8).
    */
-  app.post(
-    '/v1/households/:householdId/grocery-requests/:requestId/resolve',
-    async (c) => {
-      const user = c.get('authUser');
-      const householdId = c.req.param('householdId');
-      const principal = await authorization.authorizeCapability(
-        id<'UserId'>(user.id),
-        id<'HouseholdId'>(householdId),
-        'approve_reject_request',
-      );
-      const requestId = c.req.param('requestId');
-      const body: { expectedVersion?: number; resolution?: 'approve' | 'reject' | 'order_now' } =
-        await c.req.json().catch(() => ({}));
-      if (
-        body.expectedVersion === undefined ||
-        !Number.isFinite(body.expectedVersion) ||
-        !body.resolution
-      ) {
-        return c.json({ error: 'expected_version_and_resolution_required' }, 400);
-      }
-      const [current] = await db
+  app.post('/v1/households/:householdId/grocery-requests/:requestId/resolve', async (c) => {
+    const user = c.get('authUser');
+    const householdId = c.req.param('householdId');
+    const principal = await authorization.authorizeCapability(
+      id<'UserId'>(user.id),
+      id<'HouseholdId'>(householdId),
+      'approve_reject_request',
+    );
+    const requestId = c.req.param('requestId');
+    const body: { expectedVersion?: number; resolution?: 'approve' | 'reject' | 'order_now' } =
+      await c.req.json().catch(() => ({}));
+    if (
+      body.expectedVersion === undefined ||
+      !Number.isFinite(body.expectedVersion) ||
+      !body.resolution
+    ) {
+      return c.json({ error: 'expected_version_and_resolution_required' }, 400);
+    }
+    const [current] = await db
+      .select()
+      .from(groceryRequests)
+      .where(
+        and(
+          eq(groceryRequests.id, requestId),
+          eq(groceryRequests.householdId, principal.householdId),
+        ),
+      )
+      .limit(1);
+    if (!current) return c.json({ error: 'not_found' }, 404);
+
+    const decision = decideRequestResolution({
+      current: toDomainGroceryRequest(current),
+      expectedVersion: body.expectedVersion,
+      resolution: body.resolution,
+    });
+    if (!decision.ok) {
+      const [fresh] = await db
         .select()
         .from(groceryRequests)
-        .where(
-          and(
-            eq(groceryRequests.id, requestId),
-            eq(groceryRequests.householdId, principal.householdId),
-          ),
-        )
+        .where(eq(groceryRequests.id, requestId))
         .limit(1);
-      if (!current) return c.json({ error: 'not_found' }, 404);
+      const actor = fresh ? await latestRequestActor(db, principal.householdId, requestId) : null;
+      return c.json(
+        {
+          error: decision.reason,
+          current: fresh ? serializeGroceryRequest(toDomainGroceryRequest(fresh)) : null,
+          changedBy: actor,
+        },
+        409,
+      );
+    }
+    // Guard by construction: a resolution never places an order (AC#8).
+    assertNoOrderPlacement(decision);
 
-      const decision = decideRequestResolution({
-        current: toDomainGroceryRequest(current),
-        expectedVersion: body.expectedVersion,
-        resolution: body.resolution,
+    const eventType =
+      decision.nextStatus === 'rejected' ? 'grocery_request.rejected' : 'grocery_request.approved';
+    const [updated] = await db.transaction(async (tx) => {
+      await tx
+        .update(groceryRequests)
+        .set({
+          status: decision.nextStatus,
+          resolvedById: principal.membershipId,
+          resolvedAt: new Date(),
+          version: decision.version,
+        })
+        .where(eq(groceryRequests.id, requestId));
+      await tx.insert(systemEvents).values({
+        id: randomUUID(),
+        householdId: principal.householdId,
+        type: eventType,
+        actorId: principal.membershipId,
+        entityType: 'grocery_request',
+        entityId: requestId,
+        payload: {
+          item: current.itemText,
+          quantity: current.quantityText,
+          status: decision.nextStatus,
+        },
       });
-      if (!decision.ok) {
-        const [fresh] = await db
-          .select()
-          .from(groceryRequests)
-          .where(eq(groceryRequests.id, requestId))
-          .limit(1);
-        const actor = fresh
-          ? await latestRequestActor(db, principal.householdId, requestId)
-          : null;
-        return c.json(
-          {
-            error: decision.reason,
-            current: fresh ? serializeGroceryRequest(toDomainGroceryRequest(fresh)) : null,
-            changedBy: actor,
-          },
-          409,
-        );
-      }
-      // Guard by construction: a resolution never places an order (AC#8).
-      assertNoOrderPlacement(decision);
+      const [row] = await tx
+        .select()
+        .from(groceryRequests)
+        .where(eq(groceryRequests.id, requestId))
+        .limit(1);
+      return [row];
+    });
+    return c.json({
+      request: serializeGroceryRequest(toDomainGroceryRequest(updated!)),
+      orderNow: decision.orderNow,
+    });
+  });
 
-      const eventType =
-        decision.nextStatus === 'rejected'
-          ? 'grocery_request.rejected'
-          : 'grocery_request.approved';
-      const [updated] = await db.transaction(async (tx) => {
-        await tx
-          .update(groceryRequests)
-          .set({
-            status: decision.nextStatus,
-            resolvedById: principal.membershipId,
-            resolvedAt: new Date(),
-            version: decision.version,
-          })
-          .where(eq(groceryRequests.id, requestId));
-        await tx.insert(systemEvents).values({
-          id: randomUUID(),
-          householdId: principal.householdId,
-          type: eventType,
-          actorId: principal.membershipId,
-          entityType: 'grocery_request',
-          entityId: requestId,
-          payload: {
-            item: current.itemText,
-            quantity: current.quantityText,
-            status: decision.nextStatus,
-          },
-        });
-        const [row] = await tx
-          .select()
-          .from(groceryRequests)
-          .where(eq(groceryRequests.id, requestId))
-          .limit(1);
-        return [row];
+  // ---- grocery provider (issue 10 — match needs to exact Instamart products) ----
+  //
+  // Cooks never see connection or cart controls (AC#1). Every route below
+  // requires the `review_place_order` capability, which only Members and
+  // Owners hold. A Cook gets a 404 (authorization-denied is logged and
+  // returned as 404 so roles cannot be probed).
+
+  /**
+   * AC#1 — a Member connects their own Swiggy account through delegated OAuth.
+   * Cooklink never receives the password or OTP. The mobile app opens the
+   * returned authorization URL in a browser; Swiggy redirects back to the
+   * `redirectUri` with a code that `complete` exchanges.
+   */
+  app.post('/v1/households/:householdId/grocery-provider/connect', async (c) => {
+    const user = c.get('authUser');
+    const householdId = c.req.param('householdId');
+    const principal = await authorization.authorizeCapability(
+      id<'UserId'>(user.id),
+      id<'HouseholdId'>(householdId),
+      'review_place_order',
+    );
+    const body: { redirectUri?: string } = await c.req.json().catch(() => ({}));
+    const redirectUri = body.redirectUri ?? '';
+    if (!redirectUri) return c.json({ error: 'redirect_uri_required' }, 400);
+    const result = await provider.startOAuth({
+      memberUserId: principal.userId,
+      redirectUri,
+    });
+    return c.json(result);
+  });
+
+  /** Complete the delegated OAuth callback (AC#1). */
+  app.post('/v1/households/:householdId/grocery-provider/complete', async (c) => {
+    const user = c.get('authUser');
+    const householdId = c.req.param('householdId');
+    const principal = await authorization.authorizeCapability(
+      id<'UserId'>(user.id),
+      id<'HouseholdId'>(householdId),
+      'review_place_order',
+    );
+    const body: { code?: string; state?: string } = await c.req.json().catch(() => ({}));
+    if (!body.code || !body.state) return c.json({ error: 'code_and_state_required' }, 400);
+    const result = await provider.completeOAuth({
+      memberUserId: principal.userId,
+      code: body.code,
+      state: body.state,
+    });
+    return c.json(result);
+  });
+
+  /** AC#1 — connection status. Cooks get 404; only Members/Owners see this. */
+  app.get('/v1/households/:householdId/grocery-provider/status', async (c) => {
+    const user = c.get('authUser');
+    const householdId = c.req.param('householdId');
+    const principal = await authorization.authorizeCapability(
+      id<'UserId'>(user.id),
+      id<'HouseholdId'>(householdId),
+      'review_place_order',
+    );
+    const status = await provider.getConnectionStatus(principal.userId);
+    return c.json(status);
+  });
+
+  /** Disconnect the member's Swiggy account (AC#1). */
+  app.post('/v1/households/:householdId/grocery-provider/disconnect', async (c) => {
+    const user = c.get('authUser');
+    const householdId = c.req.param('householdId');
+    const principal = await authorization.authorizeCapability(
+      id<'UserId'>(user.id),
+      id<'HouseholdId'>(householdId),
+      'review_place_order',
+    );
+    await provider.disconnect(principal.userId);
+    return c.json({ connected: false });
+  });
+
+  /**
+   * AC#2 — the member's saved Instamart delivery addresses. Product search is
+   * scoped to the selected address.
+   */
+  app.get('/v1/households/:householdId/grocery-provider/addresses', async (c) => {
+    const user = c.get('authUser');
+    const householdId = c.req.param('householdId');
+    const principal = await authorization.authorizeCapability(
+      id<'UserId'>(user.id),
+      id<'HouseholdId'>(householdId),
+      'review_place_order',
+    );
+    try {
+      const addresses = await provider.getAddresses(principal.userId);
+      return c.json({ addresses });
+    } catch (err) {
+      if (err instanceof ProviderError)
+        return c.json({ error: err.code }, providerErrorStatus(err));
+      throw err;
+    }
+  });
+
+  /**
+   * AC#2 — search products scoped to `addressId`. Presents exact brand,
+   * variant, pack size, price, and availability. A vague grocery need yields
+   * candidates but stays unresolved until the Member chooses one (AC#3).
+   */
+  app.get('/v1/households/:householdId/grocery-provider/search', async (c) => {
+    const user = c.get('authUser');
+    const householdId = c.req.param('householdId');
+    const principal = await authorization.authorizeCapability(
+      id<'UserId'>(user.id),
+      id<'HouseholdId'>(householdId),
+      'review_place_order',
+    );
+    const addressId = c.req.query('addressId') ?? '';
+    const q = (c.req.query('q') ?? '').trim();
+    if (!addressId) return c.json({ error: 'address_id_required' }, 400);
+    if (!q) return c.json({ products: [] });
+    try {
+      const products = await provider.searchProducts({
+        memberUserId: principal.userId,
+        addressId,
+        query: q,
+      });
+      return c.json({ products });
+    } catch (err) {
+      if (err instanceof ProviderError)
+        return c.json({ error: err.code }, providerErrorStatus(err));
+      throw err;
+    }
+  });
+
+  /**
+   * AC#3 — a Member chooses an exact product for one Suggested Grocery Cart
+   * line. The need stays unresolved until this is done. The product snapshot
+   * is persisted so the review shows the exact brand/variant/pack/price at
+   * selection time.
+   */
+  app.post('/v1/households/:householdId/grocery-provider/match', async (c) => {
+    const user = c.get('authUser');
+    const householdId = c.req.param('householdId');
+    const principal = await authorization.authorizeCapability(
+      id<'UserId'>(user.id),
+      id<'HouseholdId'>(householdId),
+      'add_to_cart',
+    );
+    const body: {
+      cartItemId?: string;
+      productId?: string;
+      addressId?: string;
+      quantity?: number;
+    } = await c.req.json().catch(() => ({}));
+    if (!body.cartItemId || !body.productId || !body.addressId) {
+      return c.json({ error: 'cart_item_id_product_id_address_id_required' }, 400);
+    }
+    const quantity = body.quantity && body.quantity > 0 ? Math.floor(body.quantity) : 1;
+
+    // Verify the cart item belongs to this household.
+    const [cartRow] = await db
+      .select()
+      .from(suggestedCartItems)
+      .where(
+        and(
+          eq(suggestedCartItems.id, body.cartItemId),
+          eq(suggestedCartItems.householdId, principal.householdId),
+        ),
+      )
+      .limit(1);
+    if (!cartRow) return c.json({ error: 'cart_item_not_found' }, 404);
+
+    // Fetch the product from the provider to persist an exact snapshot.
+    let product: ProviderProduct;
+    try {
+      const results = await provider.searchProducts({
+        memberUserId: principal.userId,
+        addressId: body.addressId,
+        query: searchQueryFor(toDomainCartItem(cartRow)),
+      });
+      const found = results.find((p) => p.id === body.productId);
+      if (!found) return c.json({ error: 'product_not_found' }, 404);
+      product = found;
+    } catch (err) {
+      if (err instanceof ProviderError)
+        return c.json({ error: err.code }, providerErrorStatus(err));
+      throw err;
+    }
+
+    const match: ProductMatch = {
+      id: crypto.randomUUID(),
+      householdId: principal.householdId,
+      cartItemId: body.cartItemId,
+      productId: body.productId,
+      addressId: body.addressId,
+      quantity,
+      product,
+      selectedById: principal.membershipId,
+      selectedAt: new Date().toISOString(),
+    };
+    const repo = new DrizzleRepository(db);
+    await repo.upsertProductMatch(match);
+    return c.json({ match: serializeProductMatch(match) });
+  });
+
+  /**
+   * AC#3 — the full match plan for the current Suggested Grocery Cart. Each
+   * line is `resolved`, `unresolved`, or `unavailable` (AC#5). Cooklink never
+   * silently picks a brand or pack size.
+   */
+  app.get('/v1/households/:householdId/grocery-provider/match-plan', async (c) => {
+    const user = c.get('authUser');
+    const householdId = c.req.param('householdId');
+    const principal = await authorization.authorizeCapability(
+      id<'UserId'>(user.id),
+      id<'HouseholdId'>(householdId),
+      'add_to_cart',
+    );
+    const addressId = c.req.query('addressId') ?? '';
+    const repo = new DrizzleRepository(db);
+    const cartItems = await refreshSuggestedCart(
+      repo,
+      principal.householdId,
+      todayISO(),
+      new Date(),
+    );
+    const matches = await repo.getProductMatches(principal.householdId);
+    // Search products for unresolved cart lines so the client gets candidates.
+    const searchResults = new Map<string, ProviderProduct[]>();
+    if (addressId) {
+      for (const item of cartItems) {
+        const query = searchQueryFor(item);
+        if (!query) continue;
+        try {
+          const products = await provider.searchProducts({
+            memberUserId: principal.userId,
+            addressId,
+            query,
+          });
+          searchResults.set(item.id, products);
+        } catch {
+          // Provider not connected or error — leave candidates empty.
+        }
+      }
+    }
+    const plan = resolveMatchPlan({ cartItems, matches, searchResults });
+    return c.json({ plan: plan.map(serializeMatchResolution), allResolved: allResolved(plan) });
+  });
+
+  /** Remove a product match (the need becomes unresolved again). */
+  app.delete('/v1/households/:householdId/grocery-provider/match/:cartItemId', async (c) => {
+    const user = c.get('authUser');
+    const householdId = c.req.param('householdId');
+    const principal = await authorization.authorizeCapability(
+      id<'UserId'>(user.id),
+      id<'HouseholdId'>(householdId),
+      'add_to_cart',
+    );
+    const repo = new DrizzleRepository(db);
+    await repo.clearProductMatch(principal.householdId, c.req.param('cartItemId'));
+    return c.json({ ok: true });
+  });
+
+  /**
+   * AC#4 — build the Instamart cart from the Member's chosen products. The
+   * Member deliberately chooses `preserve` (keep unrelated items already in
+   * the Instamart cart) or `replace` (replace the full cart). Cooklink never
+   * silently erases unrelated items.
+   */
+  app.post('/v1/households/:householdId/grocery-provider/cart/build', async (c) => {
+    const user = c.get('authUser');
+    const householdId = c.req.param('householdId');
+    const principal = await authorization.authorizeCapability(
+      id<'UserId'>(user.id),
+      id<'HouseholdId'>(householdId),
+      'review_place_order',
+    );
+    const body: {
+      addressId?: string;
+      mode?: 'preserve' | 'replace';
+    } = await c.req.json().catch(() => ({}));
+    if (!body.addressId) return c.json({ error: 'address_id_required' }, 400);
+    const mode = body.mode === 'replace' ? 'replace' : 'preserve';
+
+    const repo = new DrizzleRepository(db);
+    const matches = await repo.getProductMatches(principal.householdId);
+    if (matches.length === 0) return c.json({ error: 'no_products_selected' }, 400);
+
+    // Load the current Instamart cart so preserve/replace is deliberate (AC#4).
+    let currentItems: ProviderCartItem[] = [];
+    try {
+      const current = await provider.getCart(principal.userId, body.addressId);
+      if (current) currentItems = current.items;
+    } catch (err) {
+      if (err instanceof ProviderError)
+        return c.json({ error: err.code }, providerErrorStatus(err));
+      throw err;
+    }
+
+    const intendedItems = matches.map((m) => ({ productId: m.productId, quantity: m.quantity }));
+    const plan = buildCartUpdatePlan({ currentItems, intendedItems, mode });
+
+    try {
+      const review = await provider.updateCart({
+        memberUserId: principal.userId,
+        addressId: body.addressId,
+        items: plan.items,
       });
       return c.json({
-        request: serializeGroceryRequest(toDomainGroceryRequest(updated!)),
-        orderNow: decision.orderNow,
+        review: serializeCartReview(review),
+        mode,
+        preservedCount: plan.preservedCount,
+        replacedCount: plan.replacedCount,
       });
-    },
-  );
+    } catch (err) {
+      if (err instanceof ProviderError)
+        return c.json({ error: err.code }, providerErrorStatus(err));
+      throw err;
+    }
+  });
+
+  /**
+   * AC#6 — the final cart review: every item, quantity, bill breakdown,
+   * address, store count, and only payment methods returned by the provider.
+   */
+  app.get('/v1/households/:householdId/grocery-provider/cart', async (c) => {
+    const user = c.get('authUser');
+    const householdId = c.req.param('householdId');
+    const principal = await authorization.authorizeCapability(
+      id<'UserId'>(user.id),
+      id<'HouseholdId'>(householdId),
+      'review_place_order',
+    );
+    const addressId = c.req.query('addressId') ?? '';
+    if (!addressId) return c.json({ error: 'address_id_required' }, 400);
+    try {
+      const review = await provider.getCart(principal.userId, addressId);
+      if (!review) return c.json({ review: null });
+      const validation = validateCartReview(review);
+      return c.json({ review: serializeCartReview(review), valid: validation.valid });
+    } catch (err) {
+      if (err instanceof ProviderError)
+        return c.json({ error: err.code }, providerErrorStatus(err));
+      throw err;
+    }
+  });
+
+  /**
+   * AC#5 — if a selected product became unavailable, Cooklink offers up to
+   * three exact available alternatives and requires deliberate replacement or
+   * removal.
+   */
+  app.get('/v1/households/:householdId/grocery-provider/alternatives', async (c) => {
+    const user = c.get('authUser');
+    const householdId = c.req.param('householdId');
+    const principal = await authorization.authorizeCapability(
+      id<'UserId'>(user.id),
+      id<'HouseholdId'>(householdId),
+      'add_to_cart',
+    );
+    const addressId = c.req.query('addressId') ?? '';
+    const productId = c.req.query('productId') ?? '';
+    if (!addressId || !productId) {
+      return c.json({ error: 'address_id_and_product_id_required' }, 400);
+    }
+    try {
+      const alternatives = await provider.getAlternatives({
+        memberUserId: principal.userId,
+        addressId,
+        productId,
+      });
+      return c.json({ alternatives });
+    } catch (err) {
+      if (err instanceof ProviderError)
+        return c.json({ error: err.code }, providerErrorStatus(err));
+      throw err;
+    }
+  });
 
   /**
    * The Suggested Grocery Cart for today plus the next two calendar days
@@ -2231,12 +2606,7 @@ export function createApp(db: Database, services?: AppServices) {
       id<'HouseholdId'>(householdId),
     );
     const repo = new DrizzleRepository(db);
-    const items = await refreshSuggestedCart(
-      repo,
-      principal.householdId,
-      todayISO(),
-      new Date(),
-    );
+    const items = await refreshSuggestedCart(repo, principal.householdId, todayISO(), new Date());
     return c.json({ items: items.map(serializeSuggestedCartItem) });
   });
 
@@ -2630,9 +3000,7 @@ function toDomainCartItem(row: (typeof suggestedCartItems)['$inferSelect']): Sug
     id: row.id,
     householdId: id<'HouseholdId'>(row.householdId),
     ingredientKey: row.ingredientKey,
-    groceryRequestId: row.groceryRequestId
-      ? id<'GroceryRequestId'>(row.groceryRequestId)
-      : null,
+    groceryRequestId: row.groceryRequestId ? id<'GroceryRequestId'>(row.groceryRequestId) : null,
     freeTextItem: row.freeTextItem,
     needDay: row.needDay as SuggestedCartItem['needDay'],
     affectedMeals: row.affectedMeals as SuggestedCartItem['affectedMeals'],
@@ -2656,6 +3024,75 @@ function serializeSuggestedCartItem(item: SuggestedCartItem) {
     removalReason: item.removalReason,
     checkAtHome: item.confidence !== 'likely_available',
   };
+}
+
+/** Serialize a ProductMatch for the API (issue 10, AC#3). */
+function serializeProductMatch(match: ProductMatch) {
+  return {
+    id: match.id,
+    cartItemId: match.cartItemId,
+    productId: match.productId,
+    addressId: match.addressId,
+    quantity: match.quantity,
+    product: match.product,
+    selectedById: match.selectedById as string,
+    selectedAt: match.selectedAt,
+  };
+}
+
+/** Serialize a match-plan resolution (issue 10, AC#3 / AC#5). */
+function serializeMatchResolution(res: ReturnType<typeof resolveMatchPlan>[number]) {
+  if (res.state === 'unresolved') {
+    return {
+      state: 'unresolved' as const,
+      cartItem: serializeSuggestedCartItem(res.cartItem),
+      candidates: res.candidates,
+    };
+  }
+  if (res.state === 'unavailable') {
+    return {
+      state: 'unavailable' as const,
+      cartItem: serializeSuggestedCartItem(res.cartItem),
+      match: serializeProductMatch(res.match),
+      alternatives: res.alternatives,
+    };
+  }
+  return {
+    state: 'resolved' as const,
+    cartItem: serializeSuggestedCartItem(res.cartItem),
+    match: serializeProductMatch(res.match),
+  };
+}
+
+/** Serialize a provider cart review for the API (issue 10, AC#6). */
+function serializeCartReview(review: ProviderCartReview) {
+  return {
+    addressId: review.addressId,
+    items: review.items,
+    bill: review.bill,
+    totalCents: review.totalCents,
+    availablePaymentMethods: review.availablePaymentMethods,
+    storeCount: review.storeCount,
+    hasUnavailableItems: review.hasUnavailableItems,
+  };
+}
+
+/** Map a ProviderError code to an HTTP status (issue 10, AC#7). */
+function providerErrorStatus(err: ProviderError): 400 | 401 | 404 | 429 | 502 {
+  switch (err.code) {
+    case 'not_connected':
+    case 'expired_session':
+      return 401;
+    case 'address_not_found':
+    case 'product_not_found':
+      return 404;
+    case 'rate_limited':
+      return 429;
+    case 'upstream_error':
+      return 502;
+    default:
+      return 400;
+  }
 }
 
 /**

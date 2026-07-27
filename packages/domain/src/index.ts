@@ -16,4 +16,5 @@ export * from './intent.js';
 export * from './meal-plan.js';
 export * from './meal-edit.js';
 export * from './grocery-request.js';
+export * from './provider.js';
 export * from './in-memory.js';

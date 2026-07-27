@@ -18,6 +18,7 @@ import {
   type PantryLedgerEntry,
   type PlannedMeal,
   type PlannedMealId,
+  type ProductMatch,
   type Recipe,
   type RecipeId,
   type Repository,
@@ -765,6 +766,57 @@ export class DrizzleRepository implements Repository {
       .where(eq(s.groceryOrders.householdId, householdId));
     return rows.map(groceryOrder);
   }
+
+  // ---- product matches (issue 10) ----
+  async getProductMatches(householdId: HouseholdId) {
+    const rows = await this.db
+      .select()
+      .from(s.productMatches)
+      .where(eq(s.productMatches.householdId, householdId));
+    return rows.map(productMatch);
+  }
+
+  async upsertProductMatch(match: ProductMatch) {
+    await this.db
+      .insert(s.productMatches)
+      .values({
+        id: match.id,
+        householdId: match.householdId,
+        cartItemId: match.cartItemId,
+        productId: match.productId,
+        addressId: match.addressId,
+        quantity: match.quantity,
+        product: match.product,
+        selectedById: match.selectedById,
+        selectedAt: new Date(match.selectedAt),
+      })
+      .onDuplicateKeyUpdate({
+        set: {
+          productId: match.productId,
+          addressId: match.addressId,
+          quantity: match.quantity,
+          product: match.product,
+          selectedById: match.selectedById,
+          selectedAt: new Date(match.selectedAt),
+        },
+      });
+    return match;
+  }
+
+  async clearProductMatch(householdId: HouseholdId, cartItemId: string) {
+    await this.db
+      .delete(s.productMatches)
+      .where(
+        and(
+          eq(s.productMatches.householdId, householdId),
+          eq(s.productMatches.cartItemId, cartItemId),
+        ),
+      );
+  }
+
+  async clearProductMatches(householdId: HouseholdId) {
+    await this.db.delete(s.productMatches).where(eq(s.productMatches.householdId, householdId));
+  }
 }
 
 function iso(value: Date | string): string {
@@ -957,6 +1009,20 @@ function groceryOrder(row: typeof s.groceryOrders.$inferSelect): GroceryOrder {
     householdId: id<'HouseholdId'>(row.householdId),
     placedById: id<'MembershipId'>(row.placedById),
     createdAt: iso(row.createdAt),
+  };
+}
+
+function productMatch(row: typeof s.productMatches.$inferSelect): ProductMatch {
+  return {
+    id: row.id,
+    householdId: id<'HouseholdId'>(row.householdId),
+    cartItemId: row.cartItemId,
+    productId: row.productId,
+    addressId: row.addressId,
+    quantity: row.quantity,
+    product: row.product as ProductMatch['product'],
+    selectedById: id<'MembershipId'>(row.selectedById),
+    selectedAt: iso(row.selectedAt),
   };
 }
 

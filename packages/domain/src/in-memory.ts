@@ -27,6 +27,7 @@ import type {
   VoiceTranscript,
   GroceryRequest,
 } from './types.js';
+import type { ProductMatch } from './provider.js';
 
 /**
  * A fully in-memory {@link Repository} used by the test suite (and by local
@@ -50,6 +51,7 @@ export class InMemoryRepository implements Repository {
   readonly memberState = new Map<string, HouseholdMemberState>();
   readonly devices = new Map<string, DeviceRegistration>();
   readonly orders = new Map<string, GroceryOrder>();
+  readonly productMatches = new Map<string, ProductMatch>();
 
   private now(): string {
     return new Date().toISOString();
@@ -584,6 +586,25 @@ export class InMemoryRepository implements Repository {
     return [...this.orders.values()]
       .filter((o) => o.householdId === householdId)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  // ---- product matches (issue 10) ----
+  async getProductMatches(householdId: HouseholdId): Promise<ProductMatch[]> {
+    return [...this.productMatches.values()].filter((m) => m.householdId === householdId);
+  }
+  async upsertProductMatch(match: ProductMatch): Promise<ProductMatch> {
+    // Key by householdId + cartItemId so a re-choice replaces the prior match.
+    const key = `${match.householdId}:${match.cartItemId}`;
+    this.productMatches.set(key, match);
+    return match;
+  }
+  async clearProductMatch(householdId: HouseholdId, cartItemId: string): Promise<void> {
+    this.productMatches.delete(`${householdId}:${cartItemId}`);
+  }
+  async clearProductMatches(householdId: HouseholdId): Promise<void> {
+    for (const [key, m] of [...this.productMatches.entries()]) {
+      if (m.householdId === householdId) this.productMatches.delete(key);
+    }
   }
 }
 
