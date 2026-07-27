@@ -1,0 +1,55 @@
+packages/db/src/repository.ts
+  s_2cfd87b65ee93a::t_2e6998b3e16f1c 8
+  s_2cfd87b65ee93a::t_19aacbe4ec5163 703-724
+  s_2cfd87b65ee93a::t_621712638be6df 759-764
+packages/domain/src/repository.ts
+  s_2cfd87b65ee93a::t_95efd8e36a87a4 11
+  s_2cfd87b65ee93a::t_5703f0729158f2 32
+  s_2cfd87b65ee93a::t_4e104368826686 206-214,218-222
+packages/domain/src/in-memory.ts
+  s_2cfd87b65ee93a::t_2b003f74722b6e 4,24
+  s_2cfd87b65ee93a::t_53ad5b31ca1fb3 559-578
+packages/domain/src/tests/push-dispatch.test.ts
+  s_2cfd87b65ee93a::t_19cd83ef05bd5b 1-23,25-364,366-473
+  s_2cfd87b65ee93a::t_a0243ba1c577a7 365
+  s_2cfd87b65ee93a::t_3e861b8879f196 24
+packages/domain/src/index.ts
+  s_2cfd87b65ee93a::t_bfcde6603bcfcf 14
+packages/domain/src/push-dispatch.ts
+  s_2cfd87b65ee93a::t_8c87bd62ca9e92 263
+  s_2cfd87b65ee93a::t_fc208dd3fed8e9 2-78,83-85,87-94,97-262,264-326
+  s_2cfd87b65ee93a::t_236a2d20406d4e 79-82,86,95-96
+  s_2cfd87b65ee93a::t_70734058da7baa 1
+apps/server/src/tests/notifications.routes.test.ts
+  s_2cfd87b65ee93a::t_4910f52d6448fd 1-270
+apps/server/src/app.ts
+  s_2cfd87b65ee93a::t_0ca99144acd2fc 108-118
+  s_2cfd87b65ee93a::t_8afe49af24cacf 3935-4005,4007-4202
+  s_2cfd87b65ee93a::t_fc81e85f801c29 451-466,468-469
+  s_2cfd87b65ee93a::t_e1627aebabe10e 64-68
+  s_2cfd87b65ee93a::t_ff50e067c73c0a 2
+  s_2cfd87b65ee93a::t_5603d279d4433a 467
+  s_2cfd87b65ee93a::t_1d7e52c320bda1 4006
+  s_2cfd87b65ee93a::t_35700817015917 143-148
+  s_2cfd87b65ee93a::t_9754bdb96de99b 40-41
+  s_2cfd87b65ee93a::t_c77cf67a23c04e 226-230
+  s_2cfd87b65ee93a::t_52696080fb4224 1494-1514
+  s_2cfd87b65ee93a::t_bd0f37a8d0a070 3241-3457
+  s_2cfd87b65ee93a::t_425d8466ec53e2 73
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "94f5257b60e7e81d72e897b6caf09bbd11d29299",
+  "prompts": {},
+  "sessions": {
+    "s_2cfd87b65ee93a": {
+      "agent_id": {
+        "tool": "droid",
+        "id": "e14549a0-91a4-44b6-8cdc-294609d6d719",
+        "model": "custom:GLM-5.2-0"
+      },
+      "human_author": "Ashish Huddar <ashish.hudar@gmail.com>"
+    }
+  }
+}
