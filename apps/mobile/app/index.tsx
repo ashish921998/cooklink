@@ -199,7 +199,6 @@ function OwnerOnboarding({ onCreated }: { onCreated: () => Promise<void> }) {
   const [dietStyle, setDietStyle] = useState<'vegetarian' | 'eggetarian' | 'nonvegetarian'>(
     'vegetarian',
   );
-  const [specialMealEnabled, setSpecialMealEnabled] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -215,7 +214,6 @@ function OwnerOnboarding({ onCreated }: { onCreated: () => Promise<void> }) {
           servingCount: Number(servingCount),
           mealStyle,
           dietStyle,
-          specialMealEnabled,
         }),
       });
       const elapsed = Math.round((Date.now() - startedAt) / 1000);
@@ -277,16 +275,6 @@ function OwnerOnboarding({ onCreated }: { onCreated: () => Promise<void> }) {
           </Pressable>
         ))}
       </View>
-      <Pressable
-        style={[styles.optionalButton, specialMealEnabled && styles.segmentActive]}
-        onPress={() => setSpecialMealEnabled((current) => !current)}
-      >
-        <Text style={styles.segmentText}>
-          {specialMealEnabled
-            ? 'Weekly special meal included'
-            : 'Add a weekly special meal (optional)'}
-        </Text>
-      </Pressable>
       {message ? <Text style={styles.subtitle}>{message}</Text> : null}
       <Pressable
         style={[styles.primaryButton, busy && styles.disabled]}
@@ -313,6 +301,7 @@ function TodayScreen({
   const api = useApi();
   const [meals, setMeals] = useState<PlannedMeal[] | null>(null);
   const [members, setMembers] = useState<HouseholdMember[]>([]);
+  const [view, setView] = useState<'today' | 'week'>('today');
 
   useEffect(() => {
     setMeals(null);
@@ -341,10 +330,39 @@ function TodayScreen({
         {household.role === 'owner' ? 'Owner Today' : 'Member Today'}
       </Text>
       <Text style={styles.title}>{household.name}</Text>
+      <View style={styles.segment}>
+        <Pressable
+          style={[styles.segmentButton, view === 'today' && styles.segmentActive]}
+          onPress={() => setView('today')}
+        >
+          <Text style={styles.segmentText}>Today</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.segmentButton, view === 'week' && styles.segmentActive]}
+          onPress={() => setView('week')}
+        >
+          <Text style={styles.segmentText}>Weekly Meal Plan</Text>
+        </Pressable>
+      </View>
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>Today meals</Text>
+        <Text style={styles.cardTitle}>
+          {view === 'today' ? 'Today meals' : 'Weekly Meal Plan'}
+        </Text>
         {meals ? (
-          todayMeals.map((meal) => <MealRow key={meal.id} meal={meal} />)
+          view === 'today' ? (
+            todayMeals.map((meal) => <MealRow key={meal.id} meal={meal} />)
+          ) : (
+            weekDays.map((day) => (
+              <View key={day} style={styles.dayGroup}>
+                <Text style={styles.sectionTitle}>{day === today ? 'Today' : day}</Text>
+                {meals
+                  .filter((meal) => meal.date === day)
+                  .map((meal) => (
+                    <MealRow key={meal.id} meal={meal} />
+                  ))}
+              </View>
+            ))
+          )
         ) : (
           <ActivityIndicator />
         )}
@@ -352,17 +370,6 @@ function TodayScreen({
       {household.role === 'owner' ? (
         <OwnerTools household={household} members={members} onRefresh={onRefresh} />
       ) : null}
-      <Text style={styles.sectionTitle}>Week plan</Text>
-      {weekDays.map((day) => (
-        <View key={day} style={styles.card}>
-          <Text style={styles.cardTitle}>{day === today ? 'Today' : day}</Text>
-          {(meals ?? [])
-            .filter((meal) => meal.date === day)
-            .map((meal) => (
-              <MealRow key={meal.id} meal={meal} />
-            ))}
-        </View>
-      ))}
     </ScrollView>
   );
 }
@@ -529,6 +536,7 @@ const styles = StyleSheet.create({
   cardTitle: { fontSize: 20, fontWeight: '700', color: '#24352f' },
   listItem: { fontSize: 16, color: '#52625d', paddingVertical: 4 },
   mealRow: { flexDirection: 'row', gap: 12, alignItems: 'center', paddingVertical: 4 },
+  dayGroup: { gap: 8, paddingVertical: 6 },
   mealType: {
     width: 86,
     fontSize: 13,

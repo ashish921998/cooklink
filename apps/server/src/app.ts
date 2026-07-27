@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from 'node:crypto';
-import { and, count, eq, isNull } from 'drizzle-orm';
+import { and, asc, count, eq, isNull } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
@@ -95,7 +95,8 @@ export function createApp(db: Database) {
     const meals = await db
       .select()
       .from(plannedMeals)
-      .where(eq(plannedMeals.householdId, householdId));
+      .where(eq(plannedMeals.householdId, householdId))
+      .orderBy(asc(plannedMeals.date), asc(plannedMeals.mealType));
     return c.json({ meals });
   });
 
@@ -134,23 +135,30 @@ export function createApp(db: Database) {
       specialMealEnabled?: boolean;
     } = await c.req.json().catch(() => ({}));
     const [existingHome] = await db
-      .select({ householdId: memberships.householdId })
+      .select({
+        household: households,
+        ownerMembershipId: memberships.id,
+      })
       .from(memberships)
+      .innerJoin(households, eq(households.id, memberships.householdId))
       .where(
         and(
           eq(memberships.userId, user.id),
           eq(memberships.role, 'owner'),
           eq(memberships.status, 'active'),
+          isNull(households.closedAt),
         ),
       )
       .limit(1);
     if (existingHome) {
-      const existingMeals = await db
-        .select({ id: plannedMeals.id })
-        .from(plannedMeals)
-        .where(eq(plannedMeals.householdId, existingHome.householdId));
+      const existingMeals = await ensureStarterPlan(
+        db,
+        existingHome.household,
+        existingHome.ownerMembershipId,
+      );
       return c.json({
-        householdId: existingHome.householdId,
+        householdId: existingHome.household.id,
+        planStart: existingMeals[0]?.date ?? todayISO(),
         mealCount: existingMeals.length,
         resumed: true,
       });
@@ -326,6 +334,31 @@ export function createApp(db: Database) {
   });
 
   return app;
+}
+
+type HouseholdRow = typeof households.$inferSelect;
+
+async function ensureStarterPlan(db: Database, household: HouseholdRow, ownerMembershipId: string) {
+  const existingMeals = await db
+    .select()
+    .from(plannedMeals)
+    .where(eq(plannedMeals.householdId, household.id))
+    .orderBy(asc(plannedMeals.date), asc(plannedMeals.mealType));
+  if (existingMeals.length > 0) return existingMeals;
+
+  const meals = generateStarterPlan(todayISO(), {
+    dietStyle: household.dietStyle,
+    mealStyle: household.mealStyle,
+    servings: household.servingCount,
+    specialMealEnabled: household.specialMealEnabled,
+  }).map((meal) => ({
+    id: randomUUID(),
+    householdId: household.id,
+    ...meal,
+    updatedBy: ownerMembershipId,
+  }));
+  await db.insert(plannedMeals).values(meals);
+  return meals;
 }
 
 function clampServingCount(value: number | undefined): number {
