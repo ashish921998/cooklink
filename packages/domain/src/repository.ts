@@ -15,6 +15,8 @@ import type {
   GroceryOrder,
   Household,
   HouseholdMemberState,
+  IdempotencyKeyRecord,
+  CheckoutAuditRecord,
   Membership,
   PantryLedgerEntry,
   PlannedMeal,
@@ -215,6 +217,42 @@ export interface Repository extends AuthorizationLookup {
   ): Promise<GroceryOrder>;
   getOrder(id: GroceryOrderId | string): Promise<GroceryOrder | null>;
   listOrders(householdId: HouseholdId): Promise<GroceryOrder[]>;
+  /** Reconcile a Cooklink order row with live provider status (issue 11, AC#8). */
+  updateOrderStatus(
+    householdId: HouseholdId,
+    orderId: GroceryOrderId,
+    status: GroceryOrder['status'],
+  ): Promise<void>;
+
+  // ---- checkout attempts + audit (issue 11, AC#5) ----
+  /**
+   * Read an existing idempotency-key attempt. A non-null result means a prior
+   * attempt with the same key exists and MUST be observed instead of placing
+   * again (AC#5 — unique checkout attempt prevents blind duplicate submission).
+   */
+  getIdempotencyKey(key: string): Promise<IdempotencyKeyRecord | null>;
+  /**
+   * Insert an `in_flight` attempt. The unique key constraint MUST prevent a
+   * duplicate insert; the caller treats a duplicate as an existing attempt to
+   * observe (AC#5).
+   */
+  beginIdempotencyKey(input: {
+    key: string;
+    membershipId: MembershipId;
+    householdId: HouseholdId;
+  }): Promise<IdempotencyKeyRecord>;
+  /** Mark an attempt succeeded/failed with the result payload (AC#5). */
+  completeIdempotencyKey(
+    key: string,
+    status: 'succeeded' | 'failed',
+    result: unknown,
+  ): Promise<void>;
+  /** Append a checkout audit row. Append-only — never update or delete (AC#5). */
+  appendCheckoutAudit(
+    input: Omit<CheckoutAuditRecord, 'id' | 'createdAt'>,
+  ): Promise<CheckoutAuditRecord>;
+  /** List the append-only checkout audit for a Household (visibility). */
+  listCheckoutAudit(householdId: HouseholdId): Promise<CheckoutAuditRecord[]>;
 
   // ---- product matches (issue 10) ----
   /**

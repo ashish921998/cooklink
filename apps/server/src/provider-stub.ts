@@ -3,10 +3,12 @@ import type {
   ProviderAddress,
   ProviderCartReview,
   ProviderCartItem,
+  ProviderOrder,
+  ProviderOrderItem,
   ProviderPaymentMethod,
   ProviderProduct,
 } from '@cooklink/domain';
-import { ProviderError, type UserId } from '@cooklink/domain';
+import { ProviderError, classifyCheckoutResult, type UserId } from '@cooklink/domain';
 
 /**
  * A local, deterministic Instamart provider stub (issue 10, AC#8).
@@ -27,6 +29,10 @@ interface StubMemberState {
   expiresAt: string | null;
   cart: Map<string, ProviderCartItem>; // productId -> item
   addressId: string;
+  /** Orders placed by this member through the stub (issue 11, AC#6/AC#8). */
+  orders: ProviderOrder[];
+  /** Idempotency keys already seen by place_order (AC#5 — no blind duplicate). */
+  placedKeys: Set<string>;
 }
 
 const STUB_ADDRESSES: ProviderAddress[] = [
@@ -179,6 +185,19 @@ export interface StubProviderOptions {
    * Useful for testing the AC#5 unavailable-product flow.
    */
   availabilityOverrides?: Record<string, boolean>;
+  /**
+   * Simulate a network/server uncertainty on the Nth `place_order` call
+   * (issue 11, AC#6). The call throws a `ProviderError('upstream_error')` so
+   * the server must consult `get_orders` before retrying. The order is still
+   * recorded internally so `get_orders` can prove whether it was placed.
+   */
+  failPlaceOrderOnAttempt?: number;
+  /**
+   * When set, the first `place_order` for a multi-store cart records only the
+   * first store as placed and the rest as failed (issue 11, AC#7 — partial
+   * success is shown per resulting order, not as one misleading result).
+   */
+  simulateMultiStorePartialFailure?: boolean;
 }
 
 export function createStubProvider(options: StubProviderOptions = {}): GroceryProvider {
@@ -189,6 +208,7 @@ export function createStubProvider(options: StubProviderOptions = {}): GroceryPr
       availability.set(pid, avail);
     }
   }
+  let placeOrderCallCount = 0;
 
   function memberKey(userId: UserId): string {
     return userId as string;
@@ -259,6 +279,8 @@ export function createStubProvider(options: StubProviderOptions = {}): GroceryPr
           expiresAt: null,
           cart: new Map(),
           addressId: STUB_ADDRESSES[0]!.id,
+          orders: [],
+          placedKeys: new Set(),
         });
       }
       return { authorizationUrl: url, state };
@@ -336,6 +358,112 @@ export function createStubProvider(options: StubProviderOptions = {}): GroceryPr
         .slice(0, 3)
         .map((p) => ({ ...p, available: productAvail(p) }));
       return alts;
+    },
+
+    async placeOrder({ memberUserId, addressId, paymentMethodId, idempotencyKey }) {
+      const m = ensureMember(memberUserId);
+      void addressId;
+      // AC#5 — a unique checkout attempt: a repeated idempotency key must not
+      // place a second order. The stub records the key and, on a repeat,
+      // surfaces the prior result deterministically.
+      if (m.placedKeys.has(idempotencyKey)) {
+        const prior = m.orders.filter(
+          (o) => (o as unknown as { _key?: string })._key === idempotencyKey,
+        );
+        if (prior.length > 0) {
+          const { allSucceeded, partialSuccess } = classifyCheckoutResult(prior);
+          return { orders: prior, allSucceeded, partialSuccess };
+        }
+      }
+
+      const items = [...m.cart.values()];
+      if (items.length === 0) throw new ProviderError('Cart is empty', 'cart_empty');
+
+      // Validate the payment method is one the provider returned (AC#1/AC#3).
+      const pm = STUB_PAYMENT_METHODS.find((p) => p.id === paymentMethodId);
+      if (!pm) throw new ProviderError('Payment method not available', 'upstream_error');
+
+      // Group line items by store → one ProviderOrder per resulting store
+      // (issue 11, AC#7 — multi-store partial success shown per order).
+      const byStore = new Map<string, ProviderCartItem[]>();
+      for (const item of items) {
+        const bucket = byStore.get(item.storeId) ?? [];
+        bucket.push(item);
+        byStore.set(item.storeId, bucket);
+      }
+
+      const placedAt = new Date().toISOString();
+      const cancellableUntil = new Date(Date.now() + 5 * 60_000).toISOString();
+      const deliveryEta = new Date(Date.now() + 60 * 60_000).toISOString();
+      const policy = 'Cancellable within 5 minutes of placing via the Instamart app.';
+
+      const storeEntries = [...byStore.entries()];
+      const orders: ProviderOrder[] = storeEntries.map(([storeId, storeItems], idx) => {
+        const storeName = storeItems[0]!.storeName;
+        const orderItems: ProviderOrderItem[] = storeItems.map((i) => ({
+          productId: i.productId,
+          name: i.name,
+          quantity: i.quantity,
+          lineTotalCents: i.lineTotalCents,
+          storeId,
+          storeName,
+        }));
+        const total = storeItems.reduce((sum, i) => sum + i.lineTotalCents, 0);
+        // AC#7 — simulate a partial multi-store failure on the first attempt.
+        const failed =
+          options.simulateMultiStorePartialFailure && storeEntries.length > 1 && idx > 0;
+        const order: ProviderOrder = {
+          id: `ord-${memberUserId as string}-${m.orders.length + idx}`,
+          status: failed ? 'failed' : 'placed',
+          storeId,
+          storeName,
+          totalCents: total,
+          items: orderItems,
+          placedAt,
+          deliveryEta: failed ? null : deliveryEta,
+          trackingUrl: failed
+            ? null
+            : `https://instamart.swiggy.com/track/ord-${m.orders.length + idx}`,
+          cancellableUntil: failed ? null : cancellableUntil,
+          cancellationPolicy: policy,
+        };
+        // Tag the order with its idempotency key so a repeat returns the same
+        // result instead of placing again (AC#5).
+        (order as unknown as { _key?: string })._key = idempotencyKey;
+        return order;
+      });
+
+      // AC#6 — simulate a network/server uncertainty. The order is recorded
+      // internally BEFORE the throw so `get_orders` can prove whether it was
+      // placed; the server must consult get_orders before retrying.
+      placeOrderCallCount += 1;
+      const recordOrders = () => {
+        m.placedKeys.add(idempotencyKey);
+        for (const o of orders) m.orders.push(o);
+      };
+      if (
+        options.failPlaceOrderOnAttempt === placeOrderCallCount &&
+        options.failPlaceOrderOnAttempt > 0
+      ) {
+        // Uncertainty: the request may or may not have reached the provider.
+        // Record the order (it was placed) but surface an upstream_error so
+        // the caller must verify via get_orders before retrying (AC#6).
+        recordOrders();
+        throw new ProviderError('Checkout uncertainty — verify via get_orders', 'upstream_error');
+      }
+
+      recordOrders();
+      const { allSucceeded, partialSuccess } = classifyCheckoutResult(orders);
+      return { orders, allSucceeded, partialSuccess };
+    },
+
+    async getOrders(memberUserId: UserId) {
+      const m = ensureMember(memberUserId);
+      // Return copies without the internal _key tag (issue 11, AC#6/AC#8).
+      return m.orders.map(({ ...o }) => {
+        delete (o as unknown as { _key?: string })._key;
+        return o;
+      });
     },
   };
 }

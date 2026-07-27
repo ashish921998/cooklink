@@ -13,6 +13,8 @@ import {
   type Household,
   type HouseholdId,
   type HouseholdMemberState,
+  type IdempotencyKeyRecord,
+  type CheckoutAuditRecord,
   type Membership,
   type MembershipId,
   type PantryLedgerEntry,
@@ -767,6 +769,89 @@ export class DrizzleRepository implements Repository {
     return rows.map(groceryOrder);
   }
 
+  async updateOrderStatus(
+    householdId: HouseholdId,
+    orderId: GroceryOrderId,
+    status: GroceryOrder['status'],
+  ) {
+    await this.db
+      .update(s.groceryOrders)
+      .set({ status })
+      .where(and(eq(s.groceryOrders.id, orderId), eq(s.groceryOrders.householdId, householdId)));
+  }
+
+  // ---- checkout attempts + audit (issue 11, AC#5) ----
+  async getIdempotencyKey(key: string) {
+    const [row] = await this.db
+      .select()
+      .from(s.idempotencyKeys)
+      .where(eq(s.idempotencyKeys.key, key))
+      .limit(1);
+    return row ? idempotencyKey(row) : null;
+  }
+
+  async beginIdempotencyKey(input: {
+    key: string;
+    membershipId: MembershipId;
+    householdId: HouseholdId;
+  }) {
+    // The unique `key` constraint prevents a duplicate insert; a concurrent
+    // second attempt observes the existing row instead of placing again
+    // (issue 11, AC#5 — unique checkout attempt).
+    try {
+      await this.db.insert(s.idempotencyKeys).values({
+        key: input.key,
+        membershipId: input.membershipId,
+        householdId: input.householdId,
+        status: 'in_flight',
+        result: null,
+      });
+    } catch {
+      const existing = await this.getIdempotencyKey(input.key);
+      if (existing) return existing;
+      throw new Error('begin_idempotency_key_failed');
+    }
+    const created = await this.getIdempotencyKey(input.key);
+    if (!created) throw new Error('begin_idempotency_key_failed');
+    return created;
+  }
+
+  async completeIdempotencyKey(key: string, status: 'succeeded' | 'failed', result: unknown) {
+    await this.db
+      .update(s.idempotencyKeys)
+      .set({ status, result })
+      .where(eq(s.idempotencyKeys.key, key));
+  }
+
+  async appendCheckoutAudit(input: Omit<CheckoutAuditRecord, 'id' | 'createdAt'>) {
+    const auditId = randomUUID();
+    await this.db.insert(s.checkoutAudit).values({
+      id: auditId,
+      idempotencyKey: input.idempotencyKey,
+      membershipId: input.membershipId,
+      householdId: input.householdId,
+      cartTotalCents: input.cartTotalCents,
+      paymentMethod: input.paymentMethod,
+      result: input.result,
+      verifiedViaGetOrders: input.verifiedViaGetOrders,
+    });
+    const [row] = await this.db
+      .select()
+      .from(s.checkoutAudit)
+      .where(eq(s.checkoutAudit.id, auditId))
+      .limit(1);
+    if (!row) throw new Error('append_checkout_audit_failed');
+    return checkoutAudit(row);
+  }
+
+  async listCheckoutAudit(householdId: HouseholdId) {
+    const rows = await this.db
+      .select()
+      .from(s.checkoutAudit)
+      .where(eq(s.checkoutAudit.householdId, householdId));
+    return rows.map(checkoutAudit).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
   // ---- product matches (issue 10) ----
   async getProductMatches(householdId: HouseholdId) {
     const rows = await this.db
@@ -1023,6 +1108,31 @@ function productMatch(row: typeof s.productMatches.$inferSelect): ProductMatch {
     product: row.product as ProductMatch['product'],
     selectedById: id<'MembershipId'>(row.selectedById),
     selectedAt: iso(row.selectedAt),
+  };
+}
+
+function idempotencyKey(row: typeof s.idempotencyKeys.$inferSelect): IdempotencyKeyRecord {
+  return {
+    key: row.key,
+    membershipId: id<'MembershipId'>(row.membershipId),
+    householdId: id<'HouseholdId'>(row.householdId),
+    status: row.status as IdempotencyKeyRecord['status'],
+    result: row.result,
+    createdAt: iso(row.createdAt),
+  };
+}
+
+function checkoutAudit(row: typeof s.checkoutAudit.$inferSelect): CheckoutAuditRecord {
+  return {
+    id: row.id,
+    idempotencyKey: row.idempotencyKey,
+    membershipId: id<'MembershipId'>(row.membershipId),
+    householdId: id<'HouseholdId'>(row.householdId),
+    cartTotalCents: row.cartTotalCents ?? null,
+    paymentMethod: row.paymentMethod ?? null,
+    result: row.result,
+    verifiedViaGetOrders: row.verifiedViaGetOrders,
+    createdAt: iso(row.createdAt),
   };
 }
 

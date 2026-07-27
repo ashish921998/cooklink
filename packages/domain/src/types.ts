@@ -266,6 +266,37 @@ export interface GroceryOrder {
   createdAt: ISODateTime;
 }
 
+/**
+ * A unique checkout attempt keyed by an idempotency key (issue 11, AC#5). The
+ * unique key prevents a blind duplicate submission: a second request with the
+ * same key observes the existing attempt's status instead of placing again.
+ */
+export interface IdempotencyKeyRecord {
+  key: string;
+  membershipId: MembershipId;
+  householdId: HouseholdId;
+  status: 'in_flight' | 'succeeded' | 'failed';
+  result: unknown;
+  createdAt: ISODateTime;
+}
+
+/**
+ * An append-only checkout audit row (issue 11, AC#5). The audit trail is never
+ * updated or deleted; every checkout attempt, success, failure, and
+ * recovery-via-get_orders verification is recorded exactly once.
+ */
+export interface CheckoutAuditRecord {
+  id: string;
+  idempotencyKey: string;
+  membershipId: MembershipId;
+  householdId: HouseholdId;
+  cartTotalCents: number | null;
+  paymentMethod: string | null;
+  result: string;
+  verifiedViaGetOrders: boolean;
+  createdAt: ISODateTime;
+}
+
 /** A timeline item is either a human message or a system event (issue 06). */
 export type TimelineItem =
   | { kind: 'message'; message: ChatMessage; transcript: VoiceTranscript | null }

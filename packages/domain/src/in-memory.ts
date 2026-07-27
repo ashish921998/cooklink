@@ -1,6 +1,7 @@
 import { id } from './ids.js';
 import type {
   ChatMessageId,
+  GroceryOrderId,
   GroceryRequestId,
   HouseholdId,
   MembershipId,
@@ -16,6 +17,8 @@ import type {
   GroceryOrder,
   Household,
   HouseholdMemberState,
+  IdempotencyKeyRecord,
+  CheckoutAuditRecord,
   Membership,
   PantryLedgerEntry,
   PlannedMeal,
@@ -52,6 +55,8 @@ export class InMemoryRepository implements Repository {
   readonly devices = new Map<string, DeviceRegistration>();
   readonly orders = new Map<string, GroceryOrder>();
   readonly productMatches = new Map<string, ProductMatch>();
+  readonly idempotencyKeys = new Map<string, IdempotencyKeyRecord>();
+  readonly checkoutAudit: CheckoutAuditRecord[] = [];
 
   private now(): string {
     return new Date().toISOString();
@@ -605,6 +610,65 @@ export class InMemoryRepository implements Repository {
     for (const [key, m] of [...this.productMatches.entries()]) {
       if (m.householdId === householdId) this.productMatches.delete(key);
     }
+  }
+
+  // ---- orders: status reconciliation (issue 11, AC#8) ----
+  async updateOrderStatus(
+    householdId: HouseholdId,
+    orderId: GroceryOrderId,
+    status: GroceryOrder['status'],
+  ): Promise<void> {
+    const order = this.orders.get(orderId as string);
+    if (order && order.householdId === householdId) {
+      this.orders.set(orderId as string, { ...order, status });
+    }
+  }
+
+  // ---- checkout attempts + audit (issue 11, AC#5) ----
+  async getIdempotencyKey(key: string): Promise<IdempotencyKeyRecord | null> {
+    return this.idempotencyKeys.get(key) ?? null;
+  }
+  async beginIdempotencyKey(input: {
+    key: string;
+    membershipId: MembershipId;
+    householdId: HouseholdId;
+  }): Promise<IdempotencyKeyRecord> {
+    const existing = this.idempotencyKeys.get(input.key);
+    if (existing) return existing; // unique-key semantics: observe, do not place again
+    const record: IdempotencyKeyRecord = {
+      key: input.key,
+      membershipId: input.membershipId,
+      householdId: input.householdId,
+      status: 'in_flight',
+      result: null,
+      createdAt: this.now(),
+    };
+    this.idempotencyKeys.set(input.key, record);
+    return record;
+  }
+  async completeIdempotencyKey(
+    key: string,
+    status: 'succeeded' | 'failed',
+    result: unknown,
+  ): Promise<void> {
+    const record = this.idempotencyKeys.get(key);
+    if (record) this.idempotencyKeys.set(key, { ...record, status, result });
+  }
+  async appendCheckoutAudit(
+    input: Omit<CheckoutAuditRecord, 'id' | 'createdAt'>,
+  ): Promise<CheckoutAuditRecord> {
+    const record: CheckoutAuditRecord = {
+      ...input,
+      id: crypto.randomUUID(),
+      createdAt: this.now(),
+    };
+    this.checkoutAudit.push(record);
+    return record;
+  }
+  async listCheckoutAudit(householdId: HouseholdId): Promise<CheckoutAuditRecord[]> {
+    return this.checkoutAudit
+      .filter((r) => r.householdId === householdId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 }
 

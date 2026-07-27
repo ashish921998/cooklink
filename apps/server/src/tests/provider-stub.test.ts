@@ -155,3 +155,159 @@ test('stub provider: disconnect clears the session', async () => {
   const status = await provider.getConnectionStatus(USER);
   assert.equal(status.connected, false);
 });
+
+// ---- issue 11: place_order + get_orders + recovery ----
+
+async function buildCart(
+  provider: ReturnType<typeof createStubProvider>,
+  items: { productId: string; quantity: number }[],
+) {
+  await provider.updateCart({ memberUserId: USER, addressId: 'addr-home', items });
+}
+
+test('stub provider: placeOrder returns one order per store (multi-store, AC#7)', async () => {
+  const provider = createStubProvider();
+  await connect(provider);
+  // Tomato (store-1) + Toor Dal 500g (store-2) → two stores.
+  await buildCart(provider, [
+    { productId: 'prod-tomato-500', quantity: 2 },
+    { productId: 'prod-toordal-500', quantity: 1 },
+  ]);
+  const result = await provider.placeOrder({
+    memberUserId: USER,
+    addressId: 'addr-home',
+    paymentMethodId: 'pm-cod',
+    idempotencyKey: 'key-1',
+  });
+  assert.equal(result.orders.length, 2);
+  assert.equal(result.allSucceeded, true);
+  assert.equal(result.partialSuccess, false);
+  const storeIds = new Set(result.orders.map((o) => o.storeId));
+  assert.equal(storeIds.size, 2);
+  for (const o of result.orders) {
+    assert.equal(o.status, 'placed');
+    assert.ok(o.trackingUrl);
+    assert.ok(o.cancellableUntil);
+    assert.ok(o.cancellationPolicy);
+  }
+});
+
+test('stub provider: placeOrder reports partial success when a store fails (AC#7)', async () => {
+  const provider = createStubProvider({ simulateMultiStorePartialFailure: true });
+  await connect(provider);
+  await buildCart(provider, [
+    { productId: 'prod-tomato-500', quantity: 2 },
+    { productId: 'prod-toordal-500', quantity: 1 },
+  ]);
+  const result = await provider.placeOrder({
+    memberUserId: USER,
+    addressId: 'addr-home',
+    paymentMethodId: 'pm-cod',
+    idempotencyKey: 'key-partial',
+  });
+  assert.equal(result.orders.length, 2);
+  assert.equal(result.partialSuccess, true);
+  assert.equal(result.allSucceeded, false);
+  const statuses = result.orders.map((o) => o.status).sort();
+  assert.deepEqual(statuses, ['failed', 'placed']);
+});
+
+test('stub provider: a repeated idempotency key never places a second order (AC#5)', async () => {
+  const provider = createStubProvider();
+  await connect(provider);
+  await buildCart(provider, [{ productId: 'prod-tomato-500', quantity: 1 }]);
+  const first = await provider.placeOrder({
+    memberUserId: USER,
+    addressId: 'addr-home',
+    paymentMethodId: 'pm-cod',
+    idempotencyKey: 'key-dedup',
+  });
+  const second = await provider.placeOrder({
+    memberUserId: USER,
+    addressId: 'addr-home',
+    paymentMethodId: 'pm-cod',
+    idempotencyKey: 'key-dedup',
+  });
+  // The second call returns the same order ids — no duplicate placement.
+  assert.deepEqual(second.orders.map((o) => o.id).sort(), first.orders.map((o) => o.id).sort());
+  const orders = await provider.getOrders(USER);
+  assert.equal(orders.length, 1);
+});
+
+test('stub provider: upstream uncertainty throws but the order is visible via get_orders (AC#6)', async () => {
+  const provider = createStubProvider({ failPlaceOrderOnAttempt: 1 });
+  await connect(provider);
+  await buildCart(provider, [{ productId: 'prod-tomato-500', quantity: 1 }]);
+  await assert.rejects(
+    () =>
+      provider.placeOrder({
+        memberUserId: USER,
+        addressId: 'addr-home',
+        paymentMethodId: 'pm-cod',
+        idempotencyKey: 'key-uncertain',
+      }),
+    (err: Error) => err.message.includes('verify via get_orders'),
+  );
+  // Recovery: get_orders shows the order was actually placed → never retry.
+  const orders = await provider.getOrders(USER);
+  assert.equal(orders.length, 1);
+  assert.equal(orders[0]!.status, 'placed');
+});
+
+test('stub provider: placeOrder rejects an empty cart', async () => {
+  const provider = createStubProvider();
+  await connect(provider);
+  await assert.rejects(
+    () =>
+      provider.placeOrder({
+        memberUserId: USER,
+        addressId: 'addr-home',
+        paymentMethodId: 'pm-cod',
+        idempotencyKey: 'key-empty',
+      }),
+    /Cart is empty/,
+  );
+});
+
+test('stub provider: placeOrder rejects a payment method the provider did not return', async () => {
+  const provider = createStubProvider();
+  await connect(provider);
+  await buildCart(provider, [{ productId: 'prod-tomato-500', quantity: 1 }]);
+  await assert.rejects(
+    () =>
+      provider.placeOrder({
+        memberUserId: USER,
+        addressId: 'addr-home',
+        paymentMethodId: 'pm-bogus',
+        idempotencyKey: 'key-badpm',
+      }),
+    /Payment method not available/,
+  );
+});
+
+test('stub provider: getOrders requires connection and returns live tracking (AC#8)', async () => {
+  const provider = createStubProvider();
+  await connect(provider);
+  await buildCart(provider, [{ productId: 'prod-tomato-500', quantity: 1 }]);
+  await provider.placeOrder({
+    memberUserId: USER,
+    addressId: 'addr-home',
+    paymentMethodId: 'pm-cod',
+    idempotencyKey: 'key-track',
+  });
+  const orders = await provider.getOrders(USER);
+  assert.equal(orders.length, 1);
+  assert.ok(orders[0]!.trackingUrl);
+  assert.ok(orders[0]!.deliveryEta);
+  assert.ok(orders[0]!.cancellationPolicy);
+  // The internal _key tag must not leak to callers.
+  assert.equal((orders[0] as unknown as { _key?: string })._key, undefined);
+});
+
+test('stub provider: getOrders before connecting is rejected', async () => {
+  const provider = createStubProvider();
+  await assert.rejects(
+    () => provider.getOrders(USER),
+    (err: Error) => err.message.includes('not connected'),
+  );
+});

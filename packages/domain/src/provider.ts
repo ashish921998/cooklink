@@ -1,5 +1,5 @@
 import type { HouseholdId, MembershipId, UserId } from './ids.js';
-import type { SuggestedCartItem } from './types.js';
+import type { SuggestedCartItem, ISODateTime } from './types.js';
 
 /**
  * The Instamart (Swiggy MCP) provider port for issue 10.
@@ -94,6 +94,60 @@ export interface ProviderCartReview {
   storeCount: number;
   /** True when one or more line items became unavailable since the cart was built. */
   hasUnavailableItems: boolean;
+}
+
+// ---- provider orders + checkout (issue 11) ----
+
+/** The live status of a provider order, as returned by `get_orders`. */
+export type ProviderOrderStatus =
+  'placed' | 'confirmed' | 'out_for_delivery' | 'delivered' | 'cancelled' | 'failed';
+
+/** A line item inside a resulting provider order (multi-store → per store). */
+export interface ProviderOrderItem {
+  productId: string;
+  name: string;
+  quantity: number;
+  lineTotalCents: number;
+  storeId: string;
+  storeName: string;
+}
+
+/**
+ * A provider order returned by `place_order` / `get_orders` (issue 11).
+ *
+ * Multi-store carts produce one {@link ProviderOrder} per resulting store so
+ * partial success is shown per order rather than as one misleading success or
+ * failure (AC#7). Cancellation guidance follows the provider contract (AC#8):
+ * `cancellableUntil` and `cancellationPolicy` are surfaced verbatim and
+ * Cooklink never cancels on the member's behalf.
+ */
+export interface ProviderOrder {
+  id: string;
+  status: ProviderOrderStatus;
+  storeId: string;
+  storeName: string;
+  totalCents: number;
+  items: ProviderOrderItem[];
+  placedAt: ISODateTime;
+  deliveryEta: ISODateTime | null;
+  trackingUrl: string | null;
+  /** When the provider contract still allows cancellation, else null. */
+  cancellableUntil: ISODateTime | null;
+  /** Plain-text cancellation policy from the provider contract (AC#8). */
+  cancellationPolicy: string;
+}
+
+/**
+ * The result of `place_order` (issue 11, AC#7). Multi-store carts yield one
+ * entry per resulting store so a partial success is never reported as a single
+ * misleading success or failure.
+ */
+export interface ProviderCheckoutResult {
+  orders: ProviderOrder[];
+  /** True only when every per-store order was placed (non-failed). */
+  allSucceeded: boolean;
+  /** True when at least one but not all stores succeeded. */
+  partialSuccess: boolean;
 }
 
 // ---- provider errors ----
@@ -194,6 +248,33 @@ export interface GroceryProvider {
     addressId: string;
     productId: string;
   }): Promise<ProviderProduct[]>;
+
+  /**
+   * `place_order` — confirm and place the order through MCP checkout (issue
+   * 11, AC#3). Requires a fresh Member confirmation and the selected returned
+   * payment method. The `idempotencyKey` makes the attempt unique so a blind
+   * duplicate submission is prevented (AC#5). Multi-store carts return one
+   * {@link ProviderOrder} per resulting store so partial success is shown per
+   * order (AC#7).
+   *
+   * A network/server uncertainty surfaces as a {@link ProviderError} with code
+   * `upstream_error`; the caller MUST consult {@link getOrders} before any
+   * retry is considered (AC#6).
+   */
+  placeOrder(args: {
+    memberUserId: UserId;
+    addressId: string;
+    paymentMethodId: string;
+    idempotencyKey: string;
+  }): Promise<ProviderCheckoutResult>;
+
+  /**
+   * `get_orders` — the member's recent provider orders with live status,
+   * tracking, and the provider's cancellation policy (issue 11, AC#6 / AC#8).
+   * Used both for order-history visibility and for recovery after a checkout
+   * uncertainty (AC#6 — checked before any retry).
+   */
+  getOrders(memberUserId: UserId): Promise<ProviderOrder[]>;
 }
 
 // ---- pure domain logic for product matching ----
