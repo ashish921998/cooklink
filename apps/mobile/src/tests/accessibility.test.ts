@@ -229,7 +229,7 @@ test('AC#2: Chat send/record buttons have accessibilityLabel', () => {
     'Chat must label the send button',
   );
   assert.ok(
-    source.includes('accessibilityLabel={recording'),
+    source.includes("voice.phase === 'recording' ? 'Stop recording' : 'Record voice note'"),
     'Chat must label the record button with recording state',
   );
 });

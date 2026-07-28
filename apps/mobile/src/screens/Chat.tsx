@@ -20,6 +20,13 @@ import {
 } from '../lib/chat';
 import { useAuth } from '@clerk/expo';
 import { Loading, Message, colors } from '../components/ui';
+import {
+  VOICE_CONTENT_TYPE,
+  createReviewPlayer,
+  readFileAsArrayBuffer,
+  usePhotoPicker,
+  useVoiceRecording,
+} from '../lib/media';
 
 /**
  * Household Chat (issue 04 — text chat; ticket 06 — photo and voice notes).
@@ -677,22 +684,26 @@ function Composer({
   const [draft, setDraft] = useState('');
   const [captionDraft, setCaptionDraft] = useState('');
   const [showCaption, setShowCaption] = useState(false);
-  const [recording, setRecording] = useState(false);
-  const [recordMs, setRecordMs] = useState(0);
+  const [pickedPhoto, setPickedPhoto] = useState<{
+    data: ArrayBuffer;
+    contentType: string;
+  } | null>(null);
+  const [mediaError, setMediaError] = useState<string | null>(null);
+  const [isPlayingReview, setIsPlayingReview] = useState(false);
+  const [sendingVoice, setSendingVoice] = useState(false);
 
-  // Voice recording timer (ticket 06, AC#2 — bounded at two minutes).
+  const { pickPhoto } = usePhotoPicker();
+  const voice = useVoiceRecording(MAX_VOICE_DURATION_MS);
+  const reviewPlayerRef = useRef<ReturnType<typeof createReviewPlayer> | null>(null);
+
+  // Clean up the review player when the component unmounts or the recording
+  // is discarded/sent.
   useEffect(() => {
-    if (!recording) return;
-    const start = Date.now();
-    const handle = setInterval(() => {
-      const elapsed = Date.now() - start;
-      setRecordMs(elapsed);
-      if (elapsed >= MAX_VOICE_DURATION_MS) {
-        setRecording(false);
-      }
-    }, 100);
-    return () => clearInterval(handle);
-  }, [recording]);
+    return () => {
+      reviewPlayerRef.current?.remove();
+      reviewPlayerRef.current = null;
+    };
+  }, []);
 
   function submit() {
     const body = draft.trim();
@@ -708,45 +719,158 @@ function Composer({
     return `${m}:${s.toString().padStart(2, '0')}`;
   }
 
-  // Photo capture is handled by the platform image picker (expo-image-picker
-  // in a development build). This button triggers the upload flow; the actual
-  // capture is wired by the shell when the native module is available. The
-  // placeholder sends a deterministic empty photo so the flow is testable
-  // without the native module; a real build replaces this with the picker
-  // result.
-  function pickPhoto() {
+  // ---- Photo: native image picker ----
+  async function pickPhotoNative() {
     if (disabled) return;
-    setShowCaption(true);
+    setMediaError(null);
+    try {
+      const result = await pickPhoto();
+      if (!result) return; // cancelled or permission denied
+      setPickedPhoto({ data: result.data, contentType: result.contentType });
+      setShowCaption(true);
+    } catch (err) {
+      setMediaError(err instanceof Error ? err.message : 'Could not pick photo.');
+    }
   }
 
   function sendPhotoWithCaption() {
-    // In a development build this receives the picker result bytes; the
-    // placeholder sends a minimal JPEG so the upload + send flow is exercised.
-    const placeholder = new Uint8Array([0xff, 0xd8, 0xff, 0xe0]).buffer;
-    onSendPhoto(placeholder as ArrayBuffer, 'image/jpeg', captionDraft.trim() || null);
+    if (!pickedPhoto) return;
+    onSendPhoto(pickedPhoto.data, pickedPhoto.contentType, captionDraft.trim() || null);
+    setPickedPhoto(null);
     setCaptionDraft('');
     setShowCaption(false);
   }
 
-  // Voice recording is handled by expo-audio in a development build. The
-  // placeholder creates a minimal audio buffer so the send flow is testable;
-  // a real build replaces this with the recorder output.
-  function toggleRecording() {
+  function cancelPhoto() {
+    setPickedPhoto(null);
+    setCaptionDraft('');
+    setShowCaption(false);
+  }
+
+  // ---- Voice: native recording with review ----
+  async function handleRecordPress() {
     if (disabled) return;
-    if (recording) {
-      // Stop and send the recorded voice note.
-      const placeholder = new Uint8Array([0x52, 0x49, 0x46, 0x46]).buffer;
-      onSendVoice(placeholder as ArrayBuffer, 'audio/webm', recordMs);
-      setRecording(false);
-      setRecordMs(0);
-    } else {
-      setRecording(true);
-      setRecordMs(0);
+    setMediaError(null);
+    if (voice.phase === 'idle') {
+      const started = await voice.startRecording();
+      if (!started && voice.permissionDenied) {
+        setMediaError('Microphone permission is needed to record voice notes.');
+      }
+    } else if (voice.phase === 'recording') {
+      await voice.stopRecording();
     }
+  }
+
+  function playReview() {
+    if (!voice.recordingUri) return;
+    // Clean up any prior player before creating a new one.
+    reviewPlayerRef.current?.remove();
+    const player = createReviewPlayer(voice.recordingUri);
+    reviewPlayerRef.current = player;
+    setIsPlayingReview(true);
+    player.play();
+    // Reset the playing state after a reasonable duration. The expo-audio
+    // player does not expose a simple "ended" callback in the current API
+    // surface, so we use the known recording duration as an approximation.
+    const durationSec = Math.max(1, Math.ceil(voice.durationMs / 1000));
+    setTimeout(() => {
+      setIsPlayingReview(false);
+      player.remove();
+      reviewPlayerRef.current = null;
+    }, durationSec * 1000);
+  }
+
+  async function sendVoiceRecording() {
+    if (!voice.recordingUri) return;
+    setSendingVoice(true);
+    setMediaError(null);
+    try {
+      reviewPlayerRef.current?.remove();
+      reviewPlayerRef.current = null;
+      setIsPlayingReview(false);
+      const data = await readFileAsArrayBuffer(voice.recordingUri);
+      onSendVoice(data, VOICE_CONTENT_TYPE, voice.durationMs);
+    } catch (err) {
+      setMediaError(err instanceof Error ? err.message : 'Could not read voice recording.');
+    } finally {
+      setSendingVoice(false);
+      voice.discardRecording();
+    }
+  }
+
+  function discardVoiceRecording() {
+    reviewPlayerRef.current?.remove();
+    reviewPlayerRef.current = null;
+    setIsPlayingReview(false);
+    voice.discardRecording();
+  }
+
+  // ---- Permission denied feedback ----
+  const showVoicePermissionError = voice.permissionDenied && voice.phase === 'idle';
+
+  // ---- Review state: show playback + send/discard after recording ----
+  if (voice.phase === 'reviewing') {
+    return (
+      <View style={styles.composer}>
+        <View style={styles.reviewBox}>
+          <Text style={styles.reviewLabel}>
+            Voice note ready ({formatDuration(voice.durationMs)})
+          </Text>
+          <View style={styles.reviewActions}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={isPlayingReview ? 'Playing review' : 'Play voice note'}
+              style={styles.minorButton}
+              disabled={isPlayingReview}
+              onPress={playReview}
+            >
+              <Text style={styles.minorButtonText}>
+                {isPlayingReview ? '▶ Playing…' : '▶ Play'}
+              </Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Discard voice note"
+              style={styles.minorButton}
+              onPress={discardVoiceRecording}
+            >
+              <Text style={styles.minorButtonText}>Discard</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Send voice note"
+              style={[styles.minorButtonPrimary, sendingVoice && styles.sendDisabled]}
+              disabled={sendingVoice}
+              onPress={() => void sendVoiceRecording()}
+            >
+              <Text style={styles.minorButtonPrimaryText}>
+                {sendingVoice ? 'Sending…' : 'Send voice'}
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
+    );
   }
 
   return (
     <View style={styles.composer}>
+      {mediaError || showVoicePermissionError ? (
+        <View style={styles.uploadErrorBox}>
+          <Text style={styles.uploadErrorText}>
+            {mediaError ?? 'Microphone permission is needed to record voice notes.'}
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            style={styles.minorButton}
+            onPress={() => {
+              setMediaError(null);
+            }}
+          >
+            <Text style={styles.minorButtonText}>Dismiss</Text>
+          </Pressable>
+        </View>
+      ) : null}
       {showCaption ? (
         <View style={styles.captionBox}>
           <TextInput
@@ -756,16 +880,10 @@ function Composer({
             placeholder="Add a caption (optional)"
             value={captionDraft}
             onChangeText={setCaptionDraft}
+            autoFocus
           />
           <View style={styles.editActions}>
-            <Pressable
-              accessibilityRole="button"
-              style={styles.minorButton}
-              onPress={() => {
-                setShowCaption(false);
-                setCaptionDraft('');
-              }}
-            >
+            <Pressable accessibilityRole="button" style={styles.minorButton} onPress={cancelPhoto}>
               <Text style={styles.minorButtonText}>Cancel</Text>
             </Pressable>
             <Pressable
@@ -781,24 +899,26 @@ function Composer({
         <View style={styles.composerRow}>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Send photo"
+            accessibilityLabel="Pick photo from library"
             style={[styles.mediaButton, disabled && styles.sendDisabled]}
             disabled={disabled}
-            onPress={pickPhoto}
+            onPress={() => void pickPhotoNative()}
           >
             <Text style={styles.mediaGlyph}>📷</Text>
           </Pressable>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel={recording ? 'Stop recording' : 'Record voice note'}
-            style={[styles.mediaButton, recording && styles.recordActive]}
+            accessibilityLabel={
+              voice.phase === 'recording' ? 'Stop recording' : 'Record voice note'
+            }
+            style={[styles.mediaButton, voice.phase === 'recording' && styles.recordActive]}
             disabled={disabled}
-            onPress={toggleRecording}
+            onPress={() => void handleRecordPress()}
           >
-            <Text style={styles.mediaGlyph}>{recording ? '⏹' : '🎤'}</Text>
+            <Text style={styles.mediaGlyph}>{voice.phase === 'recording' ? '⏹' : '🎤'}</Text>
           </Pressable>
-          {recording ? (
-            <Text style={styles.recordTime}>{formatDuration(recordMs)} / 2:00</Text>
+          {voice.phase === 'recording' ? (
+            <Text style={styles.recordTime}>{formatDuration(voice.durationMs)} / 2:00</Text>
           ) : (
             <TextInput
               accessibilityLabel="Message"
@@ -811,7 +931,7 @@ function Composer({
               multiline
             />
           )}
-          {recording ? null : (
+          {voice.phase === 'recording' ? null : (
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Send message"
@@ -942,6 +1062,9 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   captionBox: { gap: 8 },
+  reviewBox: { gap: 8, paddingVertical: 4 },
+  reviewLabel: { fontSize: 15, fontWeight: '700', color: colors.ink },
+  reviewActions: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
   mediaButton: {
     width: 44,
     height: 44,
