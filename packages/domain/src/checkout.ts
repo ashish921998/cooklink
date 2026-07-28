@@ -123,9 +123,7 @@ export function cartSignature(items: { productId: string; quantity: number }[]):
 
 /** Extract the {productId, quantity} pairs from a provider cart review. */
 function cartLineSignature(review: ProviderCartReview): string {
-  return cartSignature(
-    review.items.map((i) => ({ productId: i.productId, quantity: i.quantity })),
-  );
+  return cartSignature(review.items.map((i) => ({ productId: i.productId, quantity: i.quantity })));
 }
 
 /**

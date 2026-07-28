@@ -270,8 +270,7 @@ export class InMemoryRepository implements Repository {
   async searchRecipesForDiet(query: string, diet: Household['dietStyle']): Promise<Recipe[]> {
     const q = query.toLowerCase();
     return [...this.recipes.values()].filter((r) => {
-      const matchesQuery =
-        r.name.toLowerCase().includes(q) || (r.nameHi?.includes(q) ?? false);
+      const matchesQuery = r.name.toLowerCase().includes(q) || (r.nameHi?.includes(q) ?? false);
       // Match the Drizzle repo: in-diet recipes or vegetarian (most restrictive).
       const matchesDiet = r.dietStyle === diet || r.dietStyle === 'vegetarian';
       return matchesQuery && matchesDiet;
