@@ -1,0 +1,19 @@
+apps/mobile/tsconfig.json
+  s_d9225c0d3c53ef::t_a21cbf847a40c1 6-7
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "973a74ed939889256e85f54b2d685fe8df7cd8b8",
+  "prompts": {},
+  "sessions": {
+    "s_d9225c0d3c53ef": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fa7a5-01c2-7462-87d2-ef65d7cb64bb",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashish Huddar <ashish.hudar@gmail.com>"
+    }
+  }
+}
