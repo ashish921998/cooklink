@@ -13,6 +13,14 @@
     "android": {
       "package": "com.cooklink.app"
     },
-    "plugins": ["expo-router", "expo-secure-store"]
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-audio",
+      "expo-web-browser",
+      "expo-status-bar",
+      "@clerk/expo",
+      "expo-asset"
+    ]
   }
 }
