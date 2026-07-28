@@ -615,7 +615,7 @@ export class DrizzleRepository implements Repository {
     await this.db
       .insert(s.voiceTranscripts)
       .values(transcript)
-      .onDuplicateKeyUpdate({ set: transcript });
+      .onConflictDoUpdate({ target: s.voiceTranscripts.messageId, set: transcript });
     const saved = await this.getTranscript(messageId);
     if (!saved) throw new Error('set_transcript_failed');
     return saved;
@@ -698,7 +698,10 @@ export class DrizzleRepository implements Repository {
     await this.db
       .insert(s.householdMemberState)
       .values({ userId, householdId, lastReadMessageId: upTo })
-      .onDuplicateKeyUpdate({ set: { lastReadMessageId: upTo } });
+      .onConflictDoUpdate({
+        target: [s.householdMemberState.userId, s.householdMemberState.householdId],
+        set: { lastReadMessageId: upTo },
+      });
   }
   async setNotificationOverride(
     userId: UserId,
@@ -708,7 +711,10 @@ export class DrizzleRepository implements Repository {
     await this.db
       .insert(s.householdMemberState)
       .values({ userId, householdId, notificationOverride: override })
-      .onDuplicateKeyUpdate({ set: { notificationOverride: override } });
+      .onConflictDoUpdate({
+        target: [s.householdMemberState.userId, s.householdMemberState.householdId],
+        set: { notificationOverride: override },
+      });
     const [row] = await this.db
       .select()
       .from(s.householdMemberState)
@@ -732,7 +738,8 @@ export class DrizzleRepository implements Repository {
         ...device,
         invalidatedAt: device.invalidatedAt ? new Date(device.invalidatedAt) : null,
       })
-      .onDuplicateKeyUpdate({
+      .onConflictDoUpdate({
+        target: s.deviceRegistrations.pushToken,
         set: {
           userId: device.userId,
           platform: device.platform,
@@ -904,7 +911,8 @@ export class DrizzleRepository implements Repository {
         selectedById: match.selectedById,
         selectedAt: new Date(match.selectedAt),
       })
-      .onDuplicateKeyUpdate({
+      .onConflictDoUpdate({
+        target: [s.productMatches.householdId, s.productMatches.cartItemId],
         set: {
           productId: match.productId,
           addressId: match.addressId,

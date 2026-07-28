@@ -5,7 +5,7 @@ import { createApp } from '../app.js';
 
 /**
  * Ticket 03 — the Household Invite lifecycle, end to end through the Hono app
- * against MySQL. Exercises create → list → resend (revokes prior token) →
+ * against Postgres. Exercises create → list → resend (revokes prior token) →
  * revoke → accept with the matching phone → membership.joined event → Owner
  * removes the member → the removed person is denied access on the next probe.
  *
@@ -13,7 +13,7 @@ import { createApp } from '../app.js';
  */
 test(
   'a household invite moves through create, resend, revoke, accept, and removal',
-  { skip: process.env.DATABASE_URL ? false : 'DATABASE_URL is required for MySQL app tests' },
+  { skip: process.env.DATABASE_URL ? false : 'DATABASE_URL is required for Postgres app tests' },
   async () => {
     const previousDevAuth = process.env.COOKLINK_DEV_AUTH;
     process.env.COOKLINK_DEV_AUTH = 'true';
@@ -149,7 +149,7 @@ test(
  */
 test(
   'resending revokes the prior token and revoking blocks acceptance',
-  { skip: process.env.DATABASE_URL ? false : 'DATABASE_URL is required for MySQL app tests' },
+  { skip: process.env.DATABASE_URL ? false : 'DATABASE_URL is required for Postgres app tests' },
   async () => {
     const previousDevAuth = process.env.COOKLINK_DEV_AUTH;
     process.env.COOKLINK_DEV_AUTH = 'true';
@@ -239,7 +239,7 @@ test(
  */
 test(
   'two concurrent cook acceptances cannot exceed the two-cook household limit',
-  { skip: process.env.DATABASE_URL ? false : 'DATABASE_URL is required for MySQL app tests' },
+  { skip: process.env.DATABASE_URL ? false : 'DATABASE_URL is required for Postgres app tests' },
   async () => {
     const previousDevAuth = process.env.COOKLINK_DEV_AUTH;
     process.env.COOKLINK_DEV_AUTH = 'true';

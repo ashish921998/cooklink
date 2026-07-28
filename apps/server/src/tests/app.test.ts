@@ -15,7 +15,7 @@ test('health route is public JSON', async () => {
 
 test(
   'new household starter plan is inaccessible to another authenticated person',
-  { skip: process.env.DATABASE_URL ? false : 'DATABASE_URL is required for MySQL app tests' },
+  { skip: process.env.DATABASE_URL ? false : 'DATABASE_URL is required for Postgres app tests' },
   async () => {
     const previousDevAuth = process.env.COOKLINK_DEV_AUTH;
     process.env.COOKLINK_DEV_AUTH = 'true';

@@ -1,21 +1,22 @@
-import { drizzle } from 'drizzle-orm/mysql2';
-import mysql from 'mysql2/promise';
-import { migrate } from 'drizzle-orm/mysql2/migrator';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import pg from 'pg';
+import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import * as schema from './schema.js';
 
 /**
- * Apply Drizzle migrations to the configured MySQL database.
+ * Apply Drizzle migrations to the configured PostgreSQL database.
  *   pnpm db:migrate
  */
 async function main() {
   const url = process.env.DATABASE_URL;
   if (!url) throw new Error('DATABASE_URL is required');
-  const connection = await mysql.createConnection({ uri: url, multipleStatements: true });
-  const db = drizzle(connection, { schema, mode: 'default' });
+  const client = new pg.Client({ connectionString: url });
+  await client.connect();
+  const db = drizzle(client, { schema });
   console.log('Applying migrations…');
   await migrate(db, { migrationsFolder: './migrations' });
   console.log('Done.');
-  await connection.end();
+  await client.end();
 }
 
 main().catch((err) => {

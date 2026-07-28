@@ -1,7 +1,7 @@
 /**
  * Household membership lifecycle (issue 03 — removal). The pure half of the
  * Owner's "remove a Member or Cook" action, kept out of the request handler so
- * the rules can be unit-tested without MySQL and stay beside the invite rules.
+ * the rules can be unit-tested without Postgres and stay beside the invite rules.
  */
 
 export type MembershipRemovalError = 'already_removed' | 'cannot_remove_self';

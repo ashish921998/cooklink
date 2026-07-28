@@ -1,26 +1,30 @@
-import { drizzle } from 'drizzle-orm/mysql2';
-import mysql from 'mysql2/promise';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import pg from 'pg';
 import * as schema from './schema.js';
 
 export type Database = ReturnType<typeof drizzle<typeof schema>>;
 
 /**
- * Create a Drizzle MySQL client. The connection URL points at PlanetScale
- * (Mumbai) in production; locally any MySQL 8 works. There is no RLS — all
- * household scoping happens in the application server.
+ * Create a Drizzle PostgreSQL client. The connection URL points at
+ * PlanetScale Postgres (Mumbai) in production; locally any Postgres 14+
+ * works. There is no RLS — all household scoping happens in the application
+ * server.
+ *
+ * When `PGBOUNCER=true`, prepared statements are disabled to avoid conflicts
+ * with PgBouncer's transaction-mode pooling (PlanetScale recommends the
+ * PgBouncer port 6432 for normal application traffic; use the direct port
+ * only for migrations that require session-level behavior).
  */
 export function createDatabase(url: string | undefined): Database {
   const connectionString = url ?? process.env.DATABASE_URL;
   if (!connectionString) {
-    throw new Error('DATABASE_URL is required to connect to MySQL.');
+    throw new Error('DATABASE_URL is required to connect to PostgreSQL.');
   }
-  const pool = mysql.createPool({
-    uri: connectionString,
-    connectionLimit: 10,
-    multipleStatements: false,
+  const pool = new pg.Pool({
+    connectionString,
+    max: 10,
+    allowExitOnIdle: true,
+    ...(process.env.PGBOUNCER === 'true' ? { prepare: false } : {}),
   });
-  // `as never` sidesteps a version-pinned peer type mismatch between the
-  // installed mysql2 types and drizzle-orm's driver types; the pool is
-  // structurally correct at runtime.
-  return drizzle(pool as never, { schema, mode: 'default' });
+  return drizzle(pool, { schema });
 }

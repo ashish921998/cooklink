@@ -5,16 +5,16 @@ import { createApp } from '../app.js';
 
 /**
  * Ticket 04 — Household text Chat, end to end through the Hono app against
- * MySQL. Exercises: the access probe returns the caller's membershipId; an
+ * Postgres. Exercises: the access probe returns the caller's membershipId; an
  * authenticated non-member is denied the timeline; an active member sends a
  * text message, sees it attributed in server order, edits it, deletes it
  * (tombstone), marks read, and polls for newer items via the forward cursor.
  *
- * Skipped without DATABASE_URL, exactly like the ticket-02/03 MySQL tests.
+ * Skipped without DATABASE_URL, exactly like the ticket-02/03 Postgres tests.
  */
 test(
   'household text chat lifecycle through the server',
-  { skip: process.env.DATABASE_URL ? false : 'DATABASE_URL is required for MySQL app tests' },
+  { skip: process.env.DATABASE_URL ? false : 'DATABASE_URL is required for Postgres app tests' },
   async () => {
     const previousDevAuth = process.env.COOKLINK_DEV_AUTH;
     process.env.COOKLINK_DEV_AUTH = 'true';
@@ -159,7 +159,7 @@ test(
  */
 test(
   'chat is household-scoped and own-message only',
-  { skip: process.env.DATABASE_URL ? false : 'DATABASE_URL is required for MySQL app tests' },
+  { skip: process.env.DATABASE_URL ? false : 'DATABASE_URL is required for Postgres app tests' },
   async () => {
     const previousDevAuth = process.env.COOKLINK_DEV_AUTH;
     process.env.COOKLINK_DEV_AUTH = 'true';

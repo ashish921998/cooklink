@@ -7,7 +7,7 @@ import { hashPhone } from './invite-policy.js';
  * after seven days. This module is the pure, database-agnostic half of that
  * contract: the Hono handlers in `app.ts` load a row, hand it here for a
  * verdict, and then persist the resulting status. Keeping the rules out of the
- * request path lets the lifecycle be unit-tested without MySQL.
+ * request path lets the lifecycle be unit-tested without Postgres.
  */
 
 /** A Household Invite lasts seven days (spec — first use and invitations). */

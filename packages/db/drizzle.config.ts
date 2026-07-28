@@ -1,16 +1,16 @@
 import { defineConfig } from 'drizzle-kit';
 
 /**
- * Drizzle Kit config. The schema is MySQL (PlanetScale, Mumbai). Migrations
- * are emitted to `./migrations`. No row-level security — authorization is
- * enforced in the application server (issue 07, AC#6).
+ * Drizzle Kit config. The schema is PostgreSQL (PlanetScale Postgres,
+ * Mumbai). Migrations are emitted to `./migrations`. No row-level security —
+ * authorization is enforced in the application server (issue 07, AC#6).
  */
 export default defineConfig({
   schema: './src/schema.ts',
   out: './migrations',
-  dialect: 'mysql',
+  dialect: 'postgresql',
   dbCredentials: {
-    url: process.env.DATABASE_URL ?? 'mysql://root:root@localhost:3306/cooklink',
+    url: process.env.DATABASE_URL ?? '********************************/cooklink',
   },
   strict: true,
   verbose: true,

@@ -5,7 +5,7 @@ import { createApp } from '../app.js';
 
 /**
  * Issue 10 — match grocery needs to exact Instamart products, end to end
- * through the Hono app against MySQL using the local provider stub (AC#8).
+ * through the Hono app against Postgres using the local provider stub (AC#8).
  *
  * Exercises: a Member connects through delegated OAuth (AC#1); product search
  * is scoped to the delivery address (AC#2); a vague need stays unresolved
@@ -16,11 +16,11 @@ import { createApp } from '../app.js';
  * without losing the Suggested Grocery Cart (AC#7); Cooks never see connection
  * or cart controls (AC#1).
  *
- * Skipped without DATABASE_URL, exactly like the other MySQL app tests.
+ * Skipped without DATABASE_URL, exactly like the other Postgres app tests.
  */
 test(
   'match needs to exact instamart products through the server',
-  { skip: process.env.DATABASE_URL ? false : 'DATABASE_URL is required for MySQL app tests' },
+  { skip: process.env.DATABASE_URL ? false : 'DATABASE_URL is required for Postgres app tests' },
   async () => {
     const previousDevAuth = process.env.COOKLINK_DEV_AUTH;
     process.env.COOKLINK_DEV_AUTH = 'true';

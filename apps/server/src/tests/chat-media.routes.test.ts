@@ -7,7 +7,7 @@ import { StubTranscriptionService } from '../transcription.js';
 
 /**
  * Ticket 06 — Add private photo and voice-note Chat, end to end through the
- * Hono app against MySQL. Exercises: media upload returns an opaque mediaRef;
+ * Hono app against Postgres. Exercises: media upload returns an opaque mediaRef;
  * a photo message with a caption is sent and read back; a voice message is
  * transcribed server-side; the transcript is correctable and re-runs intent;
  * a caption edit re-runs intent; authorized media access is Household-scoped;
@@ -36,7 +36,7 @@ function intruderHeaders(suffix: string) {
 
 test(
   'a photo message with a caption is sent, read back, and its media is privately accessible',
-  { skip: process.env.DATABASE_URL ? false : 'DATABASE_URL is required for MySQL app tests' },
+  { skip: process.env.DATABASE_URL ? false : 'DATABASE_URL is required for Postgres app tests' },
   async () => {
     const previousDevAuth = process.env.COOKLINK_DEV_AUTH;
     process.env.COOKLINK_DEV_AUTH = 'true';
@@ -115,7 +115,7 @@ test(
 
 test(
   'a voice message is transcribed server-side and the transcript is correctable',
-  { skip: process.env.DATABASE_URL ? false : 'DATABASE_URL is required for MySQL app tests' },
+  { skip: process.env.DATABASE_URL ? false : 'DATABASE_URL is required for Postgres app tests' },
   async () => {
     const previousDevAuth = process.env.COOKLINK_DEV_AUTH;
     process.env.COOKLINK_DEV_AUTH = 'true';
@@ -229,7 +229,7 @@ test(
 
 test(
   'a voice note longer than two minutes is rejected',
-  { skip: process.env.DATABASE_URL ? false : 'DATABASE_URL is required for MySQL app tests' },
+  { skip: process.env.DATABASE_URL ? false : 'DATABASE_URL is required for Postgres app tests' },
   async () => {
     const previousDevAuth = process.env.COOKLINK_DEV_AUTH;
     process.env.COOKLINK_DEV_AUTH = 'true';
@@ -274,7 +274,7 @@ test(
 
 test(
   'cross-household media access is denied (ticket 06, AC#8)',
-  { skip: process.env.DATABASE_URL ? false : 'DATABASE_URL is required for MySQL app tests' },
+  { skip: process.env.DATABASE_URL ? false : 'DATABASE_URL is required for Postgres app tests' },
   async () => {
     const previousDevAuth = process.env.COOKLINK_DEV_AUTH;
     process.env.COOKLINK_DEV_AUTH = 'true';
@@ -332,7 +332,7 @@ test(
 
 test(
   'deleting a photo message revokes media access (ticket 06)',
-  { skip: process.env.DATABASE_URL ? false : 'DATABASE_URL is required for MySQL app tests' },
+  { skip: process.env.DATABASE_URL ? false : 'DATABASE_URL is required for Postgres app tests' },
   async () => {
     const previousDevAuth = process.env.COOKLINK_DEV_AUTH;
     process.env.COOKLINK_DEV_AUTH = 'true';
@@ -403,7 +403,7 @@ test(
 
 test(
   'editing a photo caption re-runs intent detection (ticket 06, AC#5)',
-  { skip: process.env.DATABASE_URL ? false : 'DATABASE_URL is required for MySQL app tests' },
+  { skip: process.env.DATABASE_URL ? false : 'DATABASE_URL is required for Postgres app tests' },
   async () => {
     const previousDevAuth = process.env.COOKLINK_DEV_AUTH;
     process.env.COOKLINK_DEV_AUTH = 'true';

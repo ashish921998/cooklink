@@ -48,7 +48,7 @@ export async function expireStaleSuggestions(
     .update(actionSuggestions)
     .set({ status: 'expired' })
     .where(and(eq(actionSuggestions.status, 'pending'), lte(actionSuggestions.expiresAt, now)));
-  const affected = Number(result[0]?.affectedRows ?? 0);
+  const affected = Number(result.rowCount ?? 0);
   if (affected > 0) log.info({ msg: 'job.suggestions_expired', affected });
   return { affected };
 }
@@ -60,7 +60,7 @@ export async function cleanupExpiredSwiggyTokens(
   log: Logger,
 ): Promise<JobResult> {
   const result = await db.delete(swiggyTokens).where(lte(swiggyTokens.expiresAt, now));
-  const affected = Number(result[0]?.affectedRows ?? 0);
+  const affected = Number(result.rowCount ?? 0);
   if (affected > 0) log.info({ msg: 'job.swiggy_tokens_removed', affected });
   return { affected };
 }
@@ -83,7 +83,7 @@ export async function cleanupStalePushTokens(
       lte(deviceRegistrations.lastSuccessAt, staleCutoff), // not seen in 30d
     ),
   );
-  const affected = Number(result[0]?.affectedRows ?? 0);
+  const affected = Number(result.rowCount ?? 0);
   if (affected > 0) log.info({ msg: 'job.push_tokens_pruned', affected });
   return { affected };
 }

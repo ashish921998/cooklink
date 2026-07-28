@@ -6,7 +6,7 @@ import { createApp, createInMemoryConfirmationStore } from '../app.js';
 
 /**
  * Issue 11 — complete confirmed checkout and order recovery, end to end
- * through the Hono app against MySQL using the local provider stub.
+ * through the Hono app against Postgres using the local provider stub.
  *
  * Exercises: the canonical confirmation snapshot (AC#1); a fresh explicit
  * Member confirmation + server-side role check (AC#2); eligible carts below
@@ -17,11 +17,11 @@ import { createApp, createInMemoryConfirmationStore } from '../app.js';
  * (AC#7); recent order state + tracking + cancellation guidance follow the
  * provider contract (AC#8); real ordering is feature-gated (AC#9).
  *
- * Skipped without DATABASE_URL, exactly like the other MySQL app tests.
+ * Skipped without DATABASE_URL, exactly like the other Postgres app tests.
  */
 test(
   'confirmed checkout, recovery, and order tracking through the server',
-  { skip: process.env.DATABASE_URL ? false : 'DATABASE_URL is required for MySQL app tests' },
+  { skip: process.env.DATABASE_URL ? false : 'DATABASE_URL is required for Postgres app tests' },
   async () => {
     const previousDevAuth = process.env.COOKLINK_DEV_AUTH;
     const previousOrdering = process.env.COOKLINK_ORDERING_ENABLED;
@@ -282,7 +282,7 @@ test(
 
 test(
   'feature-gated checkout declines to place when ordering is disabled (AC#9)',
-  { skip: process.env.DATABASE_URL ? false : 'DATABASE_URL is required for MySQL app tests' },
+  { skip: process.env.DATABASE_URL ? false : 'DATABASE_URL is required for Postgres app tests' },
   async () => {
     const previousDevAuth = process.env.COOKLINK_DEV_AUTH;
     const previousOrdering = process.env.COOKLINK_ORDERING_ENABLED;

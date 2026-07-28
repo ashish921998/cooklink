@@ -7,17 +7,17 @@ import { createApp } from '../app.js';
 
 /**
  * Ticket 05 — edit the Weekly Meal Plan from either role, end to end through
- * the Hono app against MySQL. Exercises: viewing the plan, swapping meals,
+ * the Hono app against Postgres. Exercises: viewing the plan, swapping meals,
  * search-and-replace, per-meal Serving Count override, regenerate one meal and
  * a day, optimistic-concurrency stale recovery, past-meal immutability, and
  * attributed `meal.changed` / `meal_plan.bulk_updated` Chat events in English
  * and Hindi.
  *
- * Skipped without DATABASE_URL, exactly like the ticket-02/03/04 MySQL tests.
+ * Skipped without DATABASE_URL, exactly like the ticket-02/03/04 Postgres tests.
  */
 test(
   'meal plan editing from either role through the server',
-  { skip: process.env.DATABASE_URL ? false : 'DATABASE_URL is required for MySQL app tests' },
+  { skip: process.env.DATABASE_URL ? false : 'DATABASE_URL is required for Postgres app tests' },
   async () => {
     const previousDevAuth = process.env.COOKLINK_DEV_AUTH;
     process.env.COOKLINK_DEV_AUTH = 'true';

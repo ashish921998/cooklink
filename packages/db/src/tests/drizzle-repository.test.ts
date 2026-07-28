@@ -7,7 +7,7 @@ const databaseUrl = process.env.DATABASE_URL;
 
 test(
   'DrizzleRepository isolates durable household reads and writes',
-  { skip: databaseUrl ? false : 'DATABASE_URL is required for MySQL integration tests' },
+  { skip: databaseUrl ? false : 'DATABASE_URL is required for Postgres integration tests' },
   async () => {
     const repo = new DrizzleRepository(createDatabase(databaseUrl));
     const suffix = crypto.randomUUID();
@@ -42,7 +42,7 @@ test(
 
 test(
   'DrizzleRepository creates grocery request and system event atomically',
-  { skip: databaseUrl ? false : 'DATABASE_URL is required for MySQL integration tests' },
+  { skip: databaseUrl ? false : 'DATABASE_URL is required for Postgres integration tests' },
   async () => {
     const repo = new DrizzleRepository(createDatabase(databaseUrl));
     const suffix = crypto.randomUUID();

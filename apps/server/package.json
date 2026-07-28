@@ -21,7 +21,7 @@
     "@hono/node-server": "^1.13.7",
     "drizzle-orm": "^0.36.4",
     "hono": "^4.6.10",
-    "mysql2": "^3.11.5",
+    "pg": "^8.13.1",
     "pino": "^10.3.1"
   },
   "devDependencies": {

@@ -6,7 +6,7 @@ import { Scheduler, JOB_INTERVALS, createScheduler } from '../scheduler.js';
 /**
  * Scheduler unit tests (issue 07, AC#17). These verify registration, the
  * no-faster-than-10s order-tracking cadence, and `runOnce` dispatch without
- * touching MySQL. The Drizzle-backed job bodies are exercised by the MySQL
+ * touching Postgres. The Drizzle-backed job bodies are exercised by the Postgres
  * integration tests in `jobs.routes.test.ts`.
  */
 

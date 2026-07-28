@@ -5,17 +5,17 @@ import { createApp } from '../app.js';
 
 /**
  * Ticket 09 — generate the three-day Suggested Grocery Cart, end to end
- * through the Hono app against MySQL. Exercises: the cart is built from the
+ * through the Hono app against Postgres. Exercises: the cart is built from the
  * current meal plan and Estimated Pantry; likely-available ingredients are
  * omitted; uncertain items appear as "Check at home"; a Member can keep or
  * remove a line with an optional reason; a Cook cannot edit the cart; the
  * cart is isolated per Household (a non-member gets 404).
  *
- * Skipped without DATABASE_URL, exactly like the other MySQL app tests.
+ * Skipped without DATABASE_URL, exactly like the other Postgres app tests.
  */
 test(
   'three-day suggested grocery cart through the server',
-  { skip: process.env.DATABASE_URL ? false : 'DATABASE_URL is required for MySQL app tests' },
+  { skip: process.env.DATABASE_URL ? false : 'DATABASE_URL is required for Postgres app tests' },
   async () => {
     const previousDevAuth = process.env.COOKLINK_DEV_AUTH;
     process.env.COOKLINK_DEV_AUTH = 'true';

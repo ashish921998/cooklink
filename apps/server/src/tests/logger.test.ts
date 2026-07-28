@@ -10,7 +10,7 @@ import type { AuthEnv } from '../auth.js';
  * Structured-logging unit tests (issue 07, AC#19). Verifies every request
  * emits a JSON line with user, Household, route, status, and latency, and
  * that authorization denials are logged as structured `authorization_denied`
- * events — without touching MySQL.
+ * events — without touching Postgres.
  */
 
 function collectingLogger(sink: unknown[]): Logger {

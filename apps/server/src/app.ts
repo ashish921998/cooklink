@@ -106,6 +106,16 @@ import type { Logger } from 'pino';
 type HouseholdRoleInvite = 'member' | 'cook';
 
 /**
+ * Detect a Postgres unique-constraint violation (SQLSTATE 23505). The `pg`
+ * driver attaches `code` to errors; fall back to a message match for safety.
+ */
+function isUniqueViolation(err: Error): boolean {
+  const code = (err as { code?: string }).code;
+  if (code === '23505') return true;
+  return /duplicate key/i.test(err.message);
+}
+
+/**
  * A no-op push dispatcher used when no real push adapter is configured
  * (development, tests). Records nothing and always reports success so the
  * dispatch pipeline runs end-to-end without a provider.
@@ -131,7 +141,7 @@ export interface AppServices {
    * A short-lived checkout confirmation store (issue 11, AC#1/AC#2). Defaults
    * to an in-memory store which is safe for V1 single-instance: a restart
    * invalidates outstanding confirmations (fail-closed) and the durable
-   * idempotency key in MySQL still prevents duplicate orders across restarts.
+   * idempotency key in PostgreSQL still prevents duplicate orders across restarts.
    */
   confirmations?: CheckoutConfirmationStore;
   /**
@@ -1041,12 +1051,12 @@ export function createApp(db: Database, services?: AppServices) {
       await db.transaction(async (tx) => {
         // The invite status update is the primary serialization point: the
         // `WHERE status = 'pending'` guard ensures only one concurrent
-        // acceptance of the same invite can proceed (affectedRows !== 1).
+        // acceptance of the same invite can proceed (rowCount !== 1).
         const result = await tx
           .update(householdInvites)
           .set({ status: 'accepted', acceptedByUserId: user.id })
           .where(and(eq(householdInvites.id, invite.id), eq(householdInvites.status, 'pending')));
-        if (result[0].affectedRows !== 1) {
+        if (result.rowCount !== 1) {
           throw new InviteAlreadyConsumedError();
         }
 
@@ -1152,10 +1162,10 @@ export function createApp(db: Database, services?: AppServices) {
       if (err instanceof InviteConflictError) {
         return c.json({ error: err.code }, 409);
       }
-      // A duplicate-key error from the unique index on (userId, householdId,
-      // status) means a concurrent acceptance already created the active
-      // membership — surface it as a conflict, not a 500.
-      if (err instanceof Error && /Duplicate entry/i.test(err.message)) {
+      // A unique-constraint violation from the unique index on (userId,
+      // householdId, status) means a concurrent acceptance already created
+      // the active membership — surface it as a conflict, not a 500.
+      if (err instanceof Error && isUniqueViolation(err)) {
         return c.json({ error: 'already_member' }, 409);
       }
       throw err;
@@ -1452,7 +1462,10 @@ export function createApp(db: Database, services?: AppServices) {
         await db
           .insert(voiceTranscripts)
           .values({ messageId, language: null, transcript: null, status: 'pending' })
-          .onDuplicateKeyUpdate({ set: { status: 'pending' } });
+          .onConflictDoUpdate({
+            target: voiceTranscripts.messageId,
+            set: { status: 'pending' },
+          });
         const [pendingRow] = await db
           .select()
           .from(voiceTranscripts)
@@ -1475,7 +1488,8 @@ export function createApp(db: Database, services?: AppServices) {
                 transcript: result.transcript,
                 status: result.status,
               })
-              .onDuplicateKeyUpdate({
+              .onConflictDoUpdate({
+                target: voiceTranscripts.messageId,
                 set: {
                   language: result.language,
                   transcript: result.transcript,
@@ -1487,7 +1501,10 @@ export function createApp(db: Database, services?: AppServices) {
             db
               .insert(voiceTranscripts)
               .values({ messageId, language: null, transcript: null, status: 'failed' })
-              .onDuplicateKeyUpdate({ set: { status: 'failed' } }),
+              .onConflictDoUpdate({
+                target: voiceTranscripts.messageId,
+                set: { status: 'failed' },
+              }),
           )
           .catch(() => {
             // A failure to persist the transcription failure is logged but
@@ -1875,7 +1892,10 @@ export function createApp(db: Database, services?: AppServices) {
         householdId: principal.householdId,
         lastReadMessageId,
       })
-      .onDuplicateKeyUpdate({ set: { lastReadMessageId } });
+      .onConflictDoUpdate({
+        target: [householdMemberState.userId, householdMemberState.householdId],
+        set: { lastReadMessageId },
+      });
     return c.json({ ok: true });
   });
 
@@ -3325,7 +3345,10 @@ export function createApp(db: Database, services?: AppServices) {
         householdId: principal.householdId,
         notificationOverride: level,
       })
-      .onDuplicateKeyUpdate({ set: { notificationOverride: level } });
+      .onConflictDoUpdate({
+        target: [householdMemberState.userId, householdMemberState.householdId],
+        set: { notificationOverride: level },
+      });
     return c.json({ ok: true, override: level });
   });
   /**
@@ -3358,7 +3381,8 @@ export function createApp(db: Database, services?: AppServices) {
         hidePreviews: body.hidePreviews ?? false,
         invalidatedAt: null,
       })
-      .onDuplicateKeyUpdate({
+      .onConflictDoUpdate({
+        target: deviceRegistrations.pushToken,
         set: {
           userId: user.id,
           platform: body.platform,
@@ -3672,7 +3696,7 @@ async function applyMealPatch(
         eq(plannedMeals.version, next.version - 1),
       ),
     );
-  if (result[0].affectedRows !== 1) return null;
+  if (result.rowCount !== 1) return null;
   const [persisted] = await db
     .select()
     .from(plannedMeals)

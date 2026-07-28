@@ -5,7 +5,7 @@ import { createApp } from '../app.js';
 
 /**
  * Issue 12 — Role-aware push notifications, end to end through the Hono app
- * against MySQL. Exercises:
+ * against Postgres. Exercises:
  *  - New memberships default Members to All, Cooks to Important (AC#1)
  *  - Per-Household notification override (AC#2)
  *  - Per-role default notification setting (AC#2)
@@ -13,11 +13,11 @@ import { createApp } from '../app.js';
  *  - Unread count preserves correct in-app state even when muted (AC#8)
  *  - Push dispatch fires on message send (AC#3/AC#5)
  *
- * Skipped without DATABASE_URL, exactly like the other MySQL app tests.
+ * Skipped without DATABASE_URL, exactly like the other Postgres app tests.
  */
 test(
   'notification settings, device registration, and unread count lifecycle',
-  { skip: process.env.DATABASE_URL ? false : 'DATABASE_URL is required for MySQL app tests' },
+  { skip: process.env.DATABASE_URL ? false : 'DATABASE_URL is required for Postgres app tests' },
   async () => {
     const previousDevAuth = process.env.COOKLINK_DEV_AUTH;
     process.env.COOKLINK_DEV_AUTH = 'true';
@@ -163,7 +163,7 @@ test(
 
 test(
   'push dispatcher receives notifications on message send (AC#3/AC#5)',
-  { skip: process.env.DATABASE_URL ? false : 'DATABASE_URL is required for MySQL app tests' },
+  { skip: process.env.DATABASE_URL ? false : 'DATABASE_URL is required for Postgres app tests' },
   async () => {
     const previousDevAuth = process.env.COOKLINK_DEV_AUTH;
     process.env.COOKLINK_DEV_AUTH = 'true';
@@ -212,7 +212,7 @@ test(
 
 test(
   'opening a notification re-authorizes via /access (AC#7)',
-  { skip: process.env.DATABASE_URL ? false : 'DATABASE_URL is required for MySQL app tests' },
+  { skip: process.env.DATABASE_URL ? false : 'DATABASE_URL is required for Postgres app tests' },
   async () => {
     const previousDevAuth = process.env.COOKLINK_DEV_AUTH;
     process.env.COOKLINK_DEV_AUTH = 'true';

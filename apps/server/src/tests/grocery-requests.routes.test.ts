@@ -5,7 +5,7 @@ import { createApp } from '../app.js';
 
 /**
  * Ticket 08 — turn Cook messages into Member-approved Grocery Requests, end to
- * end through the Hono app against MySQL. Exercises: a Cook's Hindi grocery
+ * end through the Hono app against Postgres. Exercises: a Cook's Hindi grocery
  * text produces a private suggestion; confirming creates a pending Grocery
  * Request and an attributed Chat event; a bare "I need grocery" asks one plain
  * follow-up question; a similar pending request surfaces Update quantity / Keep
@@ -14,11 +14,11 @@ import { createApp } from '../app.js';
  * places an order); a Cook cannot resolve; a Member's grocery intent adds to
  * the Suggested Grocery Cart for review.
  *
- * Skipped without DATABASE_URL, exactly like the other MySQL app tests.
+ * Skipped without DATABASE_URL, exactly like the other Postgres app tests.
  */
 test(
   'cook messages become member-approved grocery requests through the server',
-  { skip: process.env.DATABASE_URL ? false : 'DATABASE_URL is required for MySQL app tests' },
+  { skip: process.env.DATABASE_URL ? false : 'DATABASE_URL is required for Postgres app tests' },
   async () => {
     const previousDevAuth = process.env.COOKLINK_DEV_AUTH;
     process.env.COOKLINK_DEV_AUTH = 'true';
