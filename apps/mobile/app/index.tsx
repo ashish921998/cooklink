@@ -9,7 +9,7 @@ import {
   View,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { useSignIn, useSignUp, useUser } from '@clerk/clerk-expo';
+import { useSignIn, useSignUp, useUser } from '@clerk/expo';
 import { useApi } from '../src/lib/api';
 import { useHouseholds } from '../src/lib/households';
 import { colors } from '../src/components/ui';
@@ -51,35 +51,30 @@ export default function Home() {
 }
 
 function PhoneOtp() {
-  const signIn = useSignIn();
-  const signUp = useSignUp();
+  const { signIn, fetchStatus: signInStatus } = useSignIn();
+  const { signUp, fetchStatus: signUpStatus } = useSignUp();
   const [phone, setPhone] = useState('');
   const [code, setCode] = useState('');
   const [pending, setPending] = useState(false);
   const [mode, setMode] = useState<'signIn' | 'signUp'>('signIn');
   const [error, setError] = useState<string | null>(null);
+  const isFetching = signInStatus === 'fetching' || signUpStatus === 'fetching';
 
   async function startOtp() {
     setError(null);
     try {
       if (mode === 'signIn') {
-        const attempt = await signIn.signIn?.create({ identifier: phone });
-        const phoneFactor = attempt?.supportedFirstFactors?.find(
-          (factor) => factor.strategy === 'phone_code',
-        );
-        if (!phoneFactor || !('phoneNumberId' in phoneFactor))
-          throw new Error('Phone OTP is not enabled for this account.');
-        await signIn.signIn?.prepareFirstFactor({
-          strategy: 'phone_code',
-          phoneNumberId: phoneFactor.phoneNumberId,
-        });
+        const { error: sendError } = await signIn.phoneCode.sendCode({ phoneNumber: phone });
+        if (sendError) throw sendError;
       } else {
-        await signUp.signUp?.create({ phoneNumber: phone });
-        await signUp.signUp?.preparePhoneNumberVerification({ strategy: 'phone_code' });
+        const { error: createError } = await signUp.create({ phoneNumber: phone });
+        if (createError) throw createError;
+        const { error: sendError } = await signUp.verifications.sendPhoneCode();
+        if (sendError) throw sendError;
       }
       setPending(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not send the code.');
+      setError(readableAuthError(err, 'Could not send the code.'));
     }
   }
 
@@ -87,16 +82,22 @@ function PhoneOtp() {
     setError(null);
     try {
       if (mode === 'signIn') {
-        const result = await signIn.signIn?.attemptFirstFactor({ strategy: 'phone_code', code });
-        if (result?.status === 'complete')
-          await signIn.setActive?.({ session: result.createdSessionId });
+        const { error: verifyError } = await signIn.phoneCode.verifyCode({ code });
+        if (verifyError) throw verifyError;
+        if (signIn.status === 'complete') {
+          const { error: finalizeError } = await signIn.finalize();
+          if (finalizeError) throw finalizeError;
+        }
       } else {
-        const result = await signUp.signUp?.attemptPhoneNumberVerification({ code });
-        if (result?.status === 'complete')
-          await signUp.setActive?.({ session: result.createdSessionId });
+        const { error: verifyError } = await signUp.verifications.verifyPhoneCode({ code });
+        if (verifyError) throw verifyError;
+        if (signUp.status === 'complete') {
+          const { error: finalizeError } = await signUp.finalize();
+          if (finalizeError) throw finalizeError;
+        }
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'The code was not accepted.');
+      setError(readableAuthError(err, 'The code was not accepted.'));
     }
   }
 
@@ -109,13 +110,27 @@ function PhoneOtp() {
       <View style={styles.segment}>
         <Pressable
           style={[styles.segmentButton, mode === 'signIn' && styles.segmentActive]}
-          onPress={() => setMode('signIn')}
+          disabled={isFetching}
+          onPress={() => {
+            setMode('signIn');
+            setPending(false);
+            setCode('');
+            setError(null);
+            void signUp.reset();
+          }}
         >
           <Text style={styles.segmentText}>Sign in</Text>
         </Pressable>
         <Pressable
           style={[styles.segmentButton, mode === 'signUp' && styles.segmentActive]}
-          onPress={() => setMode('signUp')}
+          disabled={isFetching}
+          onPress={() => {
+            setMode('signUp');
+            setPending(false);
+            setCode('');
+            setError(null);
+            void signIn.reset();
+          }}
         >
           <Text style={styles.segmentText}>Create account</Text>
         </Pressable>
@@ -136,12 +151,29 @@ function PhoneOtp() {
           onChangeText={setCode}
         />
       ) : null}
+      {mode === 'signUp' ? <View nativeID="clerk-captcha" /> : null}
       {error ? <Text style={styles.error}>{error}</Text> : null}
-      <Pressable style={styles.primaryButton} onPress={pending ? verifyOtp : startOtp}>
+      <Pressable
+        style={styles.primaryButton}
+        disabled={isFetching}
+        onPress={pending ? verifyOtp : startOtp}
+      >
         <Text style={styles.primaryButtonText}>{pending ? 'Verify code' : 'Send code'}</Text>
       </Pressable>
     </View>
   );
+}
+
+function readableAuthError(error: unknown, fallback: string): string {
+  if (
+    error &&
+    typeof error === 'object' &&
+    'longMessage' in error &&
+    typeof error.longMessage === 'string'
+  ) {
+    return error.longMessage;
+  }
+  return error instanceof Error ? error.message : fallback;
 }
 
 function HouseholdApp() {

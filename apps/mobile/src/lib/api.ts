@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { useAuth } from '@clerk/clerk-expo';
+import { useAuth } from '@clerk/expo';
 
 const apiUrl = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
 

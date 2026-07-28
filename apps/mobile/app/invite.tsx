@@ -1,5 +1,5 @@
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { useUser } from '@clerk/clerk-expo';
+import { useUser } from '@clerk/expo';
 import { AcceptInvite } from '../src/screens/AcceptInvite';
 import { Loading } from '../src/components/ui';
 

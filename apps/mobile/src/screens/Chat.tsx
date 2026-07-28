@@ -18,7 +18,7 @@ import {
   type TimelineItem,
   useHouseholdChat,
 } from '../lib/chat';
-import { useAuth } from '@clerk/clerk-expo';
+import { useAuth } from '@clerk/expo';
 import { Loading, Message, colors } from '../components/ui';
 
 /**
