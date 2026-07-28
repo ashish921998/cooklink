@@ -1,0 +1,25 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": {
+    "builder": "RAILPACK",
+    "buildCommand": "pnpm --filter @cooklink/server... build",
+    "watchPatterns": [
+      "/apps/server/**",
+      "/packages/db/**",
+      "/packages/domain/**",
+      "/package.json",
+      "/pnpm-lock.yaml",
+      "/pnpm-workspace.yaml",
+      "/railway.json",
+      "/tsconfig.json"
+    ]
+  },
+  "deploy": {
+    "startCommand": "pnpm --filter @cooklink/server start",
+    "healthcheckPath": "/health",
+    "healthcheckTimeout": 300,
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 3,
+    "drainingSeconds": 15
+  }
+}
