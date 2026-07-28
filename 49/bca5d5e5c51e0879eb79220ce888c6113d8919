@@ -1,0 +1,19 @@
+railway.json
+  s_d9225c0d3c53ef::t_f298df9b77193b 1-25
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "49bca5d5e5c51e0879eb79220ce888c6113d8919",
+  "prompts": {},
+  "sessions": {
+    "s_d9225c0d3c53ef": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fa7a5-01c2-7462-87d2-ef65d7cb64bb",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashish Huddar <ashish.hudar@gmail.com>"
+    }
+  }
+}
