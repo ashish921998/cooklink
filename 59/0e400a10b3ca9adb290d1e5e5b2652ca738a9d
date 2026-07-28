@@ -1,0 +1,38 @@
+apps/mobile/src/tests/accessibility.test.ts
+  s_f88c0b770c748a::t_9fd361f45b27df 232
+apps/mobile/src/lib/media.ts
+  s_f88c0b770c748a::t_8421f14e2f20e9 102
+  s_f88c0b770c748a::t_11e86a8501bfb9 33
+  s_f88c0b770c748a::t_a86edd49f99e85 184-198
+  s_f88c0b770c748a::t_709e32631553c0 1-32,34-101,103-183,199-217
+apps/mobile/src/screens/Chat.tsx
+  s_f88c0b770c748a::t_1431d092453d12 687-697,699-700,702-706,722-723,725-733,737-745,750-751,753-797,801-815,819-826,830-855,858-873,883,902,905,914,916,918,920,934
+  s_d9225c0d3c53ef::t_7e16ca4f1f7c86 816-818,827-829,886,911-913,921
+  s_f88c0b770c748a::t_1ab6556039003c 1065-1067
+  s_f88c0b770c748a::t_be86ebef5b8a25 23-25,27-29
+  s_f88c0b770c748a::t_c2eba08da32331 26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "590e400a10b3ca9adb290d1e5e5b2652ca738a9d",
+  "prompts": {},
+  "sessions": {
+    "s_d9225c0d3c53ef": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fa7a5-01c2-7462-87d2-ef65d7cb64bb",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashish Huddar <ashish.hudar@gmail.com>"
+    },
+    "s_f88c0b770c748a": {
+      "agent_id": {
+        "tool": "droid",
+        "id": "4bd8035c-2b62-433a-8540-b4c3b4528410",
+        "model": "glm-5.2"
+      },
+      "human_author": "Ashish Huddar <ashish.hudar@gmail.com>"
+    }
+  }
+}
