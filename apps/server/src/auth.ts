@@ -71,7 +71,7 @@ interface ClerkIdentity {
   displayName: string;
 }
 
-async function resolveClerkIdentity(req: Request): Promise<ClerkIdentity | null> {
+export async function resolveClerkIdentity(req: Request): Promise<ClerkIdentity | null> {
   if (process.env.COOKLINK_DEV_AUTH === 'true') {
     const devUser = req.headers.get('x-clerk-user-id');
     if (devUser) {
@@ -84,9 +84,10 @@ async function resolveClerkIdentity(req: Request): Promise<ClerkIdentity | null>
   }
 
   const secretKey = process.env.CLERK_SECRET_KEY;
-  if (!secretKey) return null;
+  const publishableKey = process.env.CLERK_PUBLISHABLE_KEY;
+  if (!secretKey || !publishableKey) return null;
 
-  const clerk = createClerkClient({ secretKey });
+  const clerk = createClerkClient({ secretKey, publishableKey });
   const requestState = await clerk.authenticateRequest(req);
   if (!requestState.isSignedIn) return null;
   const clerkUserId = requestState.toAuth().userId;
