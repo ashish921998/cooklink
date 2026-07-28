@@ -129,7 +129,7 @@ function extractItem(raw: string, triggers: string[]): string {
 }
 
 function extractQuantity(text: string): string | null {
-  const m = text.match(/(\d+\s?(?:kg|g|ltr|ml|litre|packet|pack|packet|पैकेट))/i);
+  const m = text.match(/(\d+\s?(?:kg|g|ltr|ml|litre|packet|pack|पैकेट))/i);
   return m ? (m[1] ?? '').replace(/\s+/g, ' ').trim() || null : null;
 }
 

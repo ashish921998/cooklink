@@ -121,6 +121,13 @@ export function cartSignature(items: { productId: string; quantity: number }[]):
   return sorted.map((i) => `${i.productId}:${i.quantity}`).join('|');
 }
 
+/** Extract the {productId, quantity} pairs from a provider cart review. */
+function cartLineSignature(review: ProviderCartReview): string {
+  return cartSignature(
+    review.items.map((i) => ({ productId: i.productId, quantity: i.quantity })),
+  );
+}
+
 /**
  * Issue a fresh confirmation snapshot from the canonical cart review (AC#1).
  * The Member reviews this exact snapshot before confirming; the server
@@ -145,9 +152,7 @@ export function buildCheckoutConfirmation(input: {
     storeCount: input.review.storeCount,
     totalCents: input.review.totalCents,
     itemCount: input.review.items.length,
-    cartSignature: cartSignature(
-      input.review.items.map((i) => ({ productId: i.productId, quantity: i.quantity })),
-    ),
+    cartSignature: cartLineSignature(input.review),
     issuedAt,
     expiresAt,
   };
@@ -193,9 +198,7 @@ export function confirmationMatches(
   if (confirmation.storeCount !== live.review.storeCount) {
     return { valid: false, reason: 'store_count_mismatch' };
   }
-  const liveSignature = cartSignature(
-    live.review.items.map((i) => ({ productId: i.productId, quantity: i.quantity })),
-  );
+  const liveSignature = cartLineSignature(live.review);
   if (confirmation.cartSignature !== liveSignature) {
     return { valid: false, reason: 'cart_changed' };
   }
