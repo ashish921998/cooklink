@@ -1,0 +1,30 @@
+apps/mobile/src/lib/api.ts
+  s_d9225c0d3c53ef::t_7e16ca4f1f7c86 2
+apps/mobile/app/index.tsx
+  s_d9225c0d3c53ef::t_7e16ca4f1f7c86 12,54-55,61,67-68,70-73,77,85-90,92-97,100,113-120,126-133,154,156-160,167-176
+  s_d9225c0d3c53ef::t_b6a6ca4cd01af7 177-178
+apps/mobile/src/screens/Chat.tsx
+  s_d9225c0d3c53ef::t_7e16ca4f1f7c86 21
+apps/mobile/src/lib/chat.ts
+  s_d9225c0d3c53ef::t_7e16ca4f1f7c86 2
+apps/mobile/app/invite.tsx
+  s_d9225c0d3c53ef::t_7e16ca4f1f7c86 2
+apps/mobile/app/_layout.tsx
+  s_d9225c0d3c53ef::t_7e16ca4f1f7c86 1-2
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "7d0d7cc110c28c02a888bb1e33fd584cdff06c89",
+  "prompts": {},
+  "sessions": {
+    "s_d9225c0d3c53ef": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fa7a5-01c2-7462-87d2-ef65d7cb64bb",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashish Huddar <ashish.hudar@gmail.com>"
+    }
+  }
+}
