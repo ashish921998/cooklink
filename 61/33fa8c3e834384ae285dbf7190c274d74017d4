@@ -1,0 +1,21 @@
+apps/server/src/tests/auth.test.ts
+  s_d9225c0d3c53ef::t_b793d30376116e 1-22
+apps/server/src/auth.ts
+  s_d9225c0d3c53ef::t_b793d30376116e 74,87-88,90
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "6133fa8c3e834384ae285dbf7190c274d74017d4",
+  "prompts": {},
+  "sessions": {
+    "s_d9225c0d3c53ef": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fa7a5-01c2-7462-87d2-ef65d7cb64bb",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashish Huddar <ashish.hudar@gmail.com>"
+    }
+  }
+}
