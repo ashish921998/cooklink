@@ -9,12 +9,13 @@ the handoff evidence for issue 13.
 | Gate | Status | Evidence |
 |------|--------|----------|
 | End-to-end V1 journey | Locally proven | `v1-journey.test.ts` (2 tests) |
-| Accessibility contracts | Locally proven | `accessibility.test.ts` (19 tests) |
+| Accessibility contracts | Locally proven (structural) | `accessibility.test.ts` (27 tests) |
 | Localization (EN/HI) | Locally proven | `localization.test.ts` (10 tests) |
-| Household isolation | Locally proven | `household-isolation.test.ts` (15 tests) |
-| Secret-free working tree | Locally proven | `secrets-grep.ts` + `secrets-grep.test.ts` |
-| Secret-free git history | Locally proven | `secrets-history.ts` + `secrets-history.test.ts` (6 tests) |
+| Household isolation | Locally proven | `household-isolation.test.ts` (12 tests); cross-household asserts also in chat-media / authorization suites |
+| Secret-free working tree | Locally proven (mobile tree only) | `secrets-grep.ts` + `secrets-grep.test.ts` |
+| Secret-free git history | Locally proven | `secrets-history.ts` + `secrets-history.test.ts` (8 tests; reconciled `sk_test_placeholder` fixture) |
 | Recovery scenarios | Locally proven | `recovery-scenarios.test.ts` (14 tests) |
+| Native Chat media (photo + voice) | Implemented; device validation pending | `apps/mobile/src/lib/media.ts` (expo-image-picker, expo-audio) |
 | Swiggy staging | Externally blocked | No production access yet |
 | OAuth callback | Externally blocked | Requires Swiggy approval |
 | Payment behaviour | Externally blocked | Requires Swiggy staging |
@@ -49,8 +50,10 @@ drives the complete journey without a database:
 A second test proves Cook is denied `review_place_order`, `add_to_cart`, and
 `approve_reject_request` capabilities while Owner has them.
 
-The MySQL-backed server tests (in `apps/server/src/tests/`) prove the same
-journey through Hono routes with row-level household scoping.
+The PlanetScale Postgres-backed server tests (in `apps/server/src/tests/`)
+prove the same journey through Hono routes with row-level household scoping.
+These route-layer tests require a live `DATABASE_URL`; without it they are
+skipped, so they are not part of the default local evidence run.
 
 **Not yet proven:** iOS and Android device testing with real Clerk OTP sign-in.
 This requires a physical device build and manual verification.
@@ -59,7 +62,7 @@ This requires a physical device build and manual verification.
 
 **Status: Locally proven (structural contracts)**
 
-The accessibility test suite (`apps/mobile/src/tests/accessibility.test.ts`, 19
+The accessibility test suite (`apps/mobile/src/tests/accessibility.test.ts`, 27
 tests) verifies:
 
 - **Touch targets:** Bottom tabs (minHeight 56), chat header (minHeight 44),
@@ -103,7 +106,7 @@ The localization test suite (`packages/domain/src/tests/localization.test.ts`,
 **Status: Locally proven**
 
 The household isolation suite (`packages/domain/src/tests/household-isolation.test.ts`,
-15 tests) proves:
+12 tests) proves:
 
 - A member of Household A cannot authorize into Household B
 - Chat timelines never cross households
@@ -116,6 +119,12 @@ The household isolation suite (`packages/domain/src/tests/household-isolation.te
 - Media and transcripts do not leak across households
 - `isMediaAccessible` denies cross-household mediaRef
 - Edit/delete is scoped to sender + household
+
+Cross-household isolation is additionally asserted outside this dedicated
+suite: media access in `chat-media.test.ts`, capability denial in
+`authorization.test.ts`, and row-level scoping in the Postgres-backed route
+tests (the latter run only when `DATABASE_URL` is present). The dedicated
+suite count above is the 12 tests in `household-isolation.test.ts`.
 
 ## 5. Secret-free repository (AC#5)
 
@@ -133,15 +142,29 @@ Two scanners guard the repository:
    from every commit diff. Flags HIGH_ENTROPY literals and ASSIGNMENT patterns.
    The full Cooklink repository history passes clean (verified in test).
 
-Both scanners run as part of the test suite (`secrets-grep.test.ts` and
-`secrets-history.test.ts`, 6 tests for history).
+Both scanners run as part of the test suite (`secrets-grep.test.ts` with 4
+tests and `secrets-history.test.ts` with 8 tests).
+
+**Reconciled fixture:** commit `6133fa8` introduced
+`process.env.CLERK_SECRET_KEY = 'sk_test_placeholder'` in `auth.test.ts`. It
+is a reviewed all-lowercase dictionary-word placeholder (no digits, never a
+real key) but matches the `sk_test_[A-Za-z0-9]{10,}` shape. The history
+scanner allowlists this exact value in `KNOWN_PLACEHOLDERS`; the `sk_test_`
+prefix is deliberately NOT allowlisted, and a regression test proves a
+real-shaped Clerk test key is still flagged.
+
+**Scope and limits:** these are static source/history checks only. They do
+not cover secrets injected at runtime via environment variables, the
+Postgres database, provider dashboards, or Clerk's backend. The working-tree
+scanner covers `apps/mobile/` only; it is not a general whole-repository
+secret scanner.
 
 ## 6. Recovery scenarios (AC#6)
 
 **Status: Locally proven**
 
 The recovery scenarios suite
-(`packages/domain/src/tests/recovery-scenarios.test.ts`, 13 tests) demonstrates:
+(`packages/domain/src/tests/recovery-scenarios.test.ts`, 14 tests) demonstrates:
 
 1. **Checkout failure:** Deterministic failures do not retry blindly
 2. **Uncertain result:** Retries only when `get_orders` shows no placed order
@@ -199,7 +222,28 @@ is the single switch that enables real ordering.
 | Notification credentials | Pending | iOS APNs key and Android FCM credentials must be provisioned and tested |
 | Privacy copy | Pending | Privacy policy and data-handling copy needs legal review before publication |
 
-## 9. Handoff summary (AC#9)
+## 9. Native Chat media (device validation)
+
+**Status: Implemented; device validation pending**
+
+The mobile chat client captures rich media natively without `expo-file-system`:
+
+- **Photo selection** via `expo-image-picker` (gallery picker, with
+  cancellation and permission-denied states handled).
+- **Voice recording** via `expo-audio` with a two-minute auto-stop bound,
+  review/playback before send, and discard handling.
+- Accessible record/review controls and permission-state UI.
+
+The server upload contract is unchanged, so the existing chat-media tests
+still hold. **Not yet proven on real devices:** native photo selection,
+permission denial, voice recording, the two-minute auto-stop, review
+playback, discard, upload/send failure, and received-media behaviour on both
+iOS and Android. Any unexercised platform or physical-device behaviour must
+be reported as pending. A real server-side transcription adapter remains a
+bounded follow-up: it must stay feature/configuration gated, keep credentials
+server-only, and retain a deterministic test/local-development path.
+
+## 10. Handoff summary (AC#9)
 
 ### Locally ready
 
@@ -218,6 +262,14 @@ is the single switch that enables real ordering.
 - Real ordering through Swiggy MCP: `orderingEnabled` flag defaults to false.
   The domain logic, confirmation flow, and audit trail are complete and tested.
   The flag is the single switch for production enablement.
+
+### Requires device validation
+
+- Native Chat photo selection and voice recording/review on iOS and Android
+  (implemented in `apps/mobile/src/lib/media.ts`; not yet exercised on devices)
+- Real Clerk OTP sign-in on iOS and Android devices
+- Manual VoiceOver / TalkBack accessibility, large-text, focus-recovery, and
+  reduced-motion checks
 
 ### Requires account-level production approval
 
