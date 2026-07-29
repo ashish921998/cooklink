@@ -1,0 +1,24 @@
+apps/server/src/tests/secrets-history.test.ts
+  s_5f06bc1e1207e8::t_cc3c62055f29bb 31-61,70,87,104,115,126-163
+apps/server/src/secrets-history.ts
+  s_5f06bc1e1207e8::t_2f3b284935a575 33-54,97-115
+  s_5f06bc1e1207e8::t_6db592a70e8faf 32
+apps/server/src/tests/auth.test.ts
+  s_5f06bc1e1207e8::t_90009da825fa31 10-14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "ac9d248e7b9097e2a72fc052c05cacad5b1610e8",
+  "prompts": {},
+  "sessions": {
+    "s_5f06bc1e1207e8": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019fac35-9253-7d65-9dd0-a50a68b26d8d",
+        "model": "glm-5.2"
+      },
+      "human_author": "Ashish Huddar <ashish.hudar@gmail.com>"
+    }
+  }
+}
