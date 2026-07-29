@@ -1,0 +1,21 @@
+RELEASE_GATES.md
+  s_5f06bc1e1207e8::t_8fa73fc9e160b4 225-246,266-272
+  s_5f06bc1e1207e8::t_f9d42183e22679 12,14-16,18,53-56,65,109,123-128,145-160,167
+  s_5f06bc1e1207e8::t_dc71a955565f5b 273
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "27da7b9baf10ddc1acd089a51c59fd644838f7e2",
+  "prompts": {},
+  "sessions": {
+    "s_5f06bc1e1207e8": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "019fac35-9253-7d65-9dd0-a50a68b26d8d",
+        "model": "glm-5.2"
+      },
+      "human_author": "Ashish Huddar <ashish.hudar@gmail.com>"
+    }
+  }
+}
