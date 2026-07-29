@@ -1,14 +1,36 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { useApi } from '../lib/api';
+import { ApiError, useApi } from '../lib/api';
 import type { HouseholdSummary, PlannedMeal, RecipeSearchResult } from '../lib/households';
-import { Card, Loading, Message, styles } from '../components/ui';
+import {
+  Card,
+  Chip,
+  ErrorNote,
+  FadeSlideIn,
+  Field,
+  Loading,
+  Message,
+  PressableScale,
+  TabScrollView,
+  colors,
+  fonts,
+  mealAccent,
+  radius,
+  shadow,
+  space,
+  styles,
+} from '../components/ui';
 
 /**
  * The seven-day Weekly Meal Plan destination, shared by the Member and Cook
  * shells (issue 03 / ticket 05). Supports viewing, editing, search-and-replace,
  * swap, regenerate, per-meal serving-count override, stale-conflict
  * confirmation, and Hindi labels — all from either role.
+ *
+ * The week is presented as a scrollable strip of days with one day's meals
+ * below it, rather than all twenty-one meals in a single column: a household
+ * asking "what's for dinner" should not have to scroll past four other days to
+ * find out. Every day in the plan stays reachable in one tap.
  *
  * The server is the source of truth and authorizes every write; this
  * component only renders authorized rows and surfaces conflicts for fresh
@@ -17,36 +39,10 @@ import { Card, Loading, Message, styles } from '../components/ui';
 
 type Lang = 'en' | 'hi';
 
-const LABELS: Record<
-  Lang,
-  {
-    cook: string;
-    member: string;
-    mealPlan: string;
-    noMeals: string;
-    today: string;
-    special: string;
-    servings: string;
-    edit: string;
-    swap: string;
-    regenerate: string;
-    regenerateDay: string;
-    regenerateWeek: string;
-    searchReplace: string;
-    save: string;
-    cancel: string;
-    useLatest: string;
-    mealName: string;
-    searchPlaceholder: string;
-    dietMismatch: string;
-    conflictTitle: string;
-    conflictBody: string;
-    regenerating: string;
-    saving: string;
-    swapPrompt: string;
-    swapCancel: string;
-  }
-> = {
+// `en` defines the key set; `hi` is checked against it for completeness by the
+// `satisfies` clause, so a missing translation is a compile error without
+// restating all 24 key names in a standalone type.
+const LABELS = {
   en: {
     cook: 'Cook',
     member: 'Member',
@@ -73,6 +69,8 @@ const LABELS: Record<
     saving: 'Saving…',
     swapPrompt: 'Tap another meal to swap',
     swapCancel: 'Cancel swap',
+    thisWeek: 'This week',
+    noResults: 'No recipes found.',
   },
   hi: {
     cook: 'रसोई',
@@ -100,8 +98,27 @@ const LABELS: Record<
     saving: 'सहेजा जा रहा है…',
     swapPrompt: 'बदलने के लिए दूसरा भोजन चुनें',
     swapCancel: 'बदलना रद्द करें',
+    thisWeek: 'इस सप्ताह',
+    noResults: 'कोई व्यंजन नहीं मिला।',
   },
-};
+} satisfies Record<Lang, Record<string, string>>;
+
+/** `2026-07-29` → `{ weekday: 'Wed', day: '29' }`, in the device locale. */
+function dayParts(iso: string): { weekday: string; day: string } {
+  const date = new Date(`${iso}T00:00:00`);
+  return {
+    weekday: date.toLocaleDateString(undefined, { weekday: 'short' }),
+    day: String(date.getDate()),
+  };
+}
+
+function longDay(iso: string): string {
+  return new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+  });
+}
 
 export function MealPlanScreen({ household }: { household: HouseholdSummary }) {
   const api = useApi();
@@ -112,6 +129,7 @@ export function MealPlanScreen({ household }: { household: HouseholdSummary }) {
   const [editingMeal, setEditingMeal] = useState<PlannedMeal | null>(null);
   const [swapSource, setSwapSource] = useState<PlannedMeal | null>(null);
   const [conflict, setConflict] = useState<{ current: PlannedMeal } | null>(null);
+  const [activeDay, setActiveDay] = useState<string | null>(null);
 
   const loadPlan = useCallback(async () => {
     setMeals(null);
@@ -129,7 +147,10 @@ export function MealPlanScreen({ household }: { household: HouseholdSummary }) {
   }, [loadPlan]);
 
   const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
-  const days = useMemo(() => [...new Set((meals ?? []).map((m) => m.date))], [meals]);
+  const days = useMemo(() => [...new Set((meals ?? []).map((m) => m.date))].sort(), [meals]);
+
+  // Open on today when the plan covers it, otherwise on the first planned day.
+  const selectedDay = activeDay ?? (days.includes(today) ? today : days[0]) ?? null;
 
   // Merge an updated meal back into the local plan.
   const mergeMeal = useCallback((updated: PlannedMeal) => {
@@ -173,11 +194,10 @@ export function MealPlanScreen({ household }: { household: HouseholdSummary }) {
       mergeMeal(data.meal);
       setEditingMeal(null);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : '';
-      if (msg.includes('409')) {
+      if (err instanceof ApiError && err.status === 409) {
         void handleConflict(meal.id);
       } else {
-        setError(msg || 'Could not save the meal.');
+        setError(err instanceof Error ? err.message : 'Could not save the meal.');
       }
     }
   }
@@ -197,11 +217,10 @@ export function MealPlanScreen({ household }: { household: HouseholdSummary }) {
       mergeSwapped(data.meals[0]!, data.meals[1]!);
       setSwapSource(null);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : '';
-      if (msg.includes('409')) {
+      if (err instanceof ApiError && err.status === 409) {
         void handleConflict(a.id);
       } else {
-        setError(msg || 'Could not swap the meals.');
+        setError(err instanceof Error ? err.message : 'Could not swap the meals.');
       }
       setSwapSource(null);
     }
@@ -228,58 +247,91 @@ export function MealPlanScreen({ household }: { household: HouseholdSummary }) {
     }
   }
 
-  if (!meals) return <Loading />;
-  if (error && meals.length === 0) return <Message title="Meal Plan" body={error} />;
+  if (!meals) return <Loading label={t.mealPlan} />;
+  if (error && meals.length === 0) return <Message title={t.mealPlan} body={error} />;
+
+  const dayMeals = meals.filter((m) => m.date === selectedDay);
 
   return (
-    <ScrollView contentContainerStyle={styles.screen}>
-      <Text style={styles.eyebrow}>
-        {household.role === 'cook' ? t.cook : t.member} · {t.mealPlan}
-      </Text>
-      <Text style={styles.title}>{household.name}</Text>
-
-      {swapSource ? (
-        <Card>
-          <Text style={styles.subtitle}>
-            {t.swapPrompt}: {swapSource.name}
-          </Text>
-          <Pressable
-            accessibilityRole="button"
-            style={styles.ghostButton}
-            onPress={() => setSwapSource(null)}
-          >
-            <Text style={styles.ghostButtonText}>{t.swapCancel}</Text>
-          </Pressable>
-        </Card>
-      ) : null}
-
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-
-      {meals.length === 0 ? (
-        <Card>
-          <Text style={styles.subtitle}>{t.noMeals}</Text>
-        </Card>
-      ) : (
-        days.map((day) => (
-          <View key={day} style={styles.dayGroup}>
-            <View style={dayHeaderStyles.row}>
-              <Text style={styles.sectionTitle}>{day === today ? t.today : day}</Text>
-              <Pressable
+    <View style={plan.root}>
+      {/* The week strip. Sticky above the day's meals so any day is one tap away. */}
+      <View style={plan.stripWrap}>
+        <Text style={[styles.eyebrow, plan.stripLabel]}>{t.thisWeek}</Text>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={plan.strip}
+        >
+          {days.map((day) => {
+            const parts = dayParts(day);
+            const isSelected = day === selectedDay;
+            const isToday = day === today;
+            return (
+              <PressableScale
+                key={day}
                 accessibilityRole="button"
-                style={styles.ghostButton}
-                onPress={() => void regenerate({ kind: 'day', fromDate: day })}
+                accessibilityLabel={`${longDay(day)}${isToday ? `, ${t.today}` : ''}`}
+                accessibilityState={{ selected: isSelected }}
+                style={[plan.day, isSelected && plan.dayOn]}
+                onPress={() => setActiveDay(day)}
               >
-                <Text style={styles.ghostButtonText}>{t.regenerateDay}</Text>
-              </Pressable>
+                <Text style={[plan.dayWeekday, isSelected && plan.dayTextOn]}>{parts.weekday}</Text>
+                <Text style={[plan.dayNumber, isSelected && plan.dayTextOn]}>{parts.day}</Text>
+                {isToday ? <View style={[plan.dot, isSelected && plan.dotOn]} /> : null}
+              </PressableScale>
+            );
+          })}
+        </ScrollView>
+      </View>
+
+      <TabScrollView contentContainerStyle={plan.scroll} showsVerticalScrollIndicator={false}>
+        {swapSource ? (
+          <FadeSlideIn from={10}>
+            <View style={plan.swapBar}>
+              <Text style={plan.swapText} numberOfLines={2}>
+                {t.swapPrompt}: {swapSource.name}
+              </Text>
+              <PressableScale
+                accessibilityRole="button"
+                accessibilityLabel={t.swapCancel}
+                style={styles.ghostButton}
+                onPress={() => setSwapSource(null)}
+              >
+                <Text style={styles.ghostButtonText}>{t.swapCancel}</Text>
+              </PressableScale>
             </View>
-            {meals
-              .filter((m) => m.date === day)
-              .map((meal) => (
+          </FadeSlideIn>
+        ) : null}
+
+        {error ? <ErrorNote>{error}</ErrorNote> : null}
+
+        {meals.length === 0 ? (
+          <Card>
+            <Text style={styles.subtitle}>{t.noMeals}</Text>
+          </Card>
+        ) : (
+          <>
+            <View style={plan.dayHead}>
+              <Text style={plan.dayTitle}>
+                {selectedDay === today ? t.today : selectedDay ? longDay(selectedDay) : ''}
+              </Text>
+              <PressableScale
+                accessibilityRole="button"
+                accessibilityLabel={t.regenerateDay}
+                style={styles.ghostButton}
+                onPress={() => void regenerate({ kind: 'day', fromDate: selectedDay ?? today })}
+              >
+                <Text style={styles.ghostButtonText}>↻ {t.regenerateDay}</Text>
+              </PressableScale>
+            </View>
+
+            {dayMeals.map((meal, i) => (
+              <FadeSlideIn key={meal.id} delay={i * 60}>
                 <MealRow
-                  key={meal.id}
                   meal={meal}
                   lang={lang}
                   isSwapSource={swapSource?.id === meal.id}
+                  isSwapTarget={Boolean(swapSource) && swapSource?.id !== meal.id}
                   onOpen={() => setEditingMeal(meal)}
                   onSwapSelect={() => {
                     if (swapSource && swapSource.id !== meal.id) {
@@ -287,20 +339,22 @@ export function MealPlanScreen({ household }: { household: HouseholdSummary }) {
                     }
                   }}
                 />
-              ))}
-          </View>
-        ))
-      )}
+              </FadeSlideIn>
+            ))}
 
-      <Pressable
-        accessibilityRole="button"
-        style={styles.secondaryButton}
-        onPress={() =>
-          void regenerate({ kind: 'remaining_week', fromDate: today, includeEdited: false })
-        }
-      >
-        <Text style={styles.secondaryButtonText}>{t.regenerateWeek}</Text>
-      </Pressable>
+            <PressableScale
+              accessibilityRole="button"
+              accessibilityLabel={t.regenerateWeek}
+              style={[styles.secondaryButton, plan.weekButton]}
+              onPress={() =>
+                void regenerate({ kind: 'remaining_week', fromDate: today, includeEdited: false })
+              }
+            >
+              <Text style={styles.secondaryButtonText}>{t.regenerateWeek}</Text>
+            </PressableScale>
+          </>
+        )}
+      </TabScrollView>
 
       {editingMeal ? (
         <MealDetailSheet
@@ -332,38 +386,58 @@ export function MealPlanScreen({ household }: { household: HouseholdSummary }) {
           }}
         />
       ) : null}
-    </ScrollView>
+    </View>
   );
 }
 
+/**
+ * One meal in the selected day. During a swap the row it would swap with is
+ * outlined and relabelled, so the second tap's effect is never a guess.
+ */
 function MealRow({
   meal,
   lang,
   isSwapSource,
+  isSwapTarget,
   onOpen,
   onSwapSelect,
 }: {
   meal: PlannedMeal;
   lang: Lang;
   isSwapSource: boolean;
+  isSwapTarget: boolean;
   onOpen: () => void;
   onSwapSelect: () => void;
 }) {
   const t = LABELS[lang];
+  const accent = mealAccent(meal.mealType);
   return (
-    <Pressable
+    <PressableScale
       accessibilityRole="button"
       accessibilityLabel={`${meal.mealType} ${meal.name}`}
-      style={[styles.mealRow, isSwapSource && selectedStyles.row]}
-      onPress={isSwapSource ? onSwapSelect : onOpen}
+      accessibilityState={{ selected: isSwapSource }}
+      style={[plan.meal, isSwapSource && plan.mealSource, isSwapTarget && plan.mealTarget]}
+      onPress={isSwapTarget ? onSwapSelect : onOpen}
     >
-      <Text style={styles.mealType}>{meal.mealType}</Text>
-      <Text style={styles.mealName}>
-        {meal.name}
-        {meal.isSpecial ? ` · ${t.special}` : ''}
-        {meal.servingsOverridden ? ` · ${meal.servings} ${t.servings}` : ''}
-      </Text>
-    </Pressable>
+      <View style={[plan.mealGlyph, { backgroundColor: accent.tint }]}>
+        <Text style={plan.mealGlyphText}>{accent.glyph}</Text>
+      </View>
+      <View style={plan.mealBody}>
+        <Text style={[styles.mealType, { color: accent.label }]}>{meal.mealType}</Text>
+        <Text style={plan.mealName}>{meal.name}</Text>
+        {meal.servingsOverridden ? (
+          <Text style={plan.mealMeta}>
+            {meal.servings} {t.servings}
+          </Text>
+        ) : null}
+      </View>
+      <View style={plan.mealTail}>
+        {meal.isSpecial ? (
+          <Chip label={t.special} tint={colors.brandSoft} ink={colors.brand} />
+        ) : null}
+        <Text style={plan.chevron}>›</Text>
+      </View>
+    </PressableScale>
   );
 }
 
@@ -385,6 +459,7 @@ function MealDetailSheet({
   onSwap: () => void;
 }) {
   const t = LABELS[lang];
+  const accent = mealAccent(meal.mealType);
   const [mode, setMode] = useState<'details' | 'editName' | 'search'>('details');
   const [nameDraft, setNameDraft] = useState(meal.name);
   const [searchQuery, setSearchQuery] = useState('');
@@ -423,123 +498,173 @@ function MealDetailSheet({
 
   return (
     <View style={sheetStyles.overlay}>
-      <View style={sheetStyles.sheet}>
-        <View style={sheetStyles.header}>
-          <Text style={styles.eyebrow}>{meal.mealType}</Text>
-          <Pressable accessibilityRole="button" onPress={onClose} style={sheetStyles.closeBtn}>
-            <Text style={styles.ghostButtonText}>✕</Text>
-          </Pressable>
-        </View>
+      {/* Tapping the dimmed area closes the sheet, matching the OS convention. */}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={t.cancel}
+        style={sheetStyles.scrim}
+        onPress={onClose}
+      />
+      <FadeSlideIn from={40} style={sheetStyles.sheetHolder}>
+        <View style={sheetStyles.sheet}>
+          <View style={sheetStyles.grabber} />
 
-        {mode === 'details' ? (
-          <>
-            <Text style={sheetStyles.mealName}>{meal.name}</Text>
-            <View style={sheetStyles.metaRow}>
-              <Text style={styles.subtitle}>
-                {t.servings}: {meal.servings}
-                {meal.servingsOverridden ? ' (overridden)' : ''}
-              </Text>
-              {meal.isSpecial ? <Text style={styles.subtitle}> · {t.special}</Text> : null}
-            </View>
+          {mode === 'details' ? (
+            <>
+              <View style={sheetStyles.hero}>
+                <View style={[sheetStyles.heroGlyph, { backgroundColor: accent.tint }]}>
+                  <Text style={sheetStyles.heroGlyphText}>{accent.glyph}</Text>
+                </View>
+                <View style={sheetStyles.heroText}>
+                  <Text style={[styles.mealType, { color: accent.label }]}>{meal.mealType}</Text>
+                  <Text style={sheetStyles.mealName}>{meal.name}</Text>
+                  <Text style={styles.subtitle}>
+                    {t.servings}: {meal.servings}
+                    {meal.servingsOverridden ? ' · overridden' : ''}
+                    {meal.isSpecial ? ` · ${t.special}` : ''}
+                  </Text>
+                </View>
+              </View>
 
-            <Pressable
-              accessibilityRole="button"
-              style={styles.primaryButton}
-              onPress={() => setMode('editName')}
-            >
-              <Text style={styles.primaryButtonText}>{t.edit}</Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              style={styles.ghostButton}
-              onPress={() => setMode('search')}
-            >
-              <Text style={styles.ghostButtonText}>{t.searchReplace}</Text>
-            </Pressable>
-
-            <ServingsEditor meal={meal} lang={lang} onSave={(servings) => onEdit({ servings })} />
-
-            <Pressable
-              accessibilityRole="button"
-              style={styles.ghostButton}
-              onPress={() => onRegenerate('meal')}
-            >
-              <Text style={styles.ghostButtonText}>{t.regenerate}</Text>
-            </Pressable>
-            <Pressable accessibilityRole="button" style={styles.ghostButton} onPress={onSwap}>
-              <Text style={styles.ghostButtonText}>{t.swap}</Text>
-            </Pressable>
-          </>
-        ) : mode === 'editName' ? (
-          <>
-            <Text style={styles.sectionTitle}>{t.edit}</Text>
-            <TextInput
-              accessibilityLabel={t.mealName}
-              style={styles.input}
-              value={nameDraft}
-              onChangeText={setNameDraft}
-              autoFocus
-              placeholder={t.mealName}
-            />
-            <View style={sheetStyles.actions}>
-              <Pressable
+              <PressableScale
                 accessibilityRole="button"
-                style={styles.ghostButton}
-                onPress={() => {
-                  setNameDraft(meal.name);
-                  setMode('details');
-                }}
+                accessibilityLabel={t.searchReplace}
+                style={styles.primaryButton}
+                onPress={() => setMode('search')}
+              >
+                <Text style={styles.primaryButtonText}>{t.searchReplace}</Text>
+              </PressableScale>
+
+              <View style={sheetStyles.actionGrid}>
+                <PressableScale
+                  accessibilityRole="button"
+                  accessibilityLabel={t.edit}
+                  style={[styles.ghostButton, sheetStyles.gridButton]}
+                  to={0.94}
+                  onPress={() => setMode('editName')}
+                >
+                  <Text style={[styles.ghostButtonText, sheetStyles.gridButtonText]}>
+                    ✎ {t.edit}
+                  </Text>
+                </PressableScale>
+                <PressableScale
+                  accessibilityRole="button"
+                  accessibilityLabel={t.regenerate}
+                  style={[styles.ghostButton, sheetStyles.gridButton]}
+                  to={0.94}
+                  onPress={() => onRegenerate('meal')}
+                >
+                  <Text style={[styles.ghostButtonText, sheetStyles.gridButtonText]}>
+                    ↻ {t.regenerate}
+                  </Text>
+                </PressableScale>
+                <PressableScale
+                  accessibilityRole="button"
+                  accessibilityLabel={t.swap}
+                  style={[styles.ghostButton, sheetStyles.gridButton]}
+                  to={0.94}
+                  onPress={onSwap}
+                >
+                  <Text style={[styles.ghostButtonText, sheetStyles.gridButtonText]}>
+                    ⇄ {t.swap}
+                  </Text>
+                </PressableScale>
+              </View>
+
+              <ServingsEditor meal={meal} lang={lang} onSave={(servings) => onEdit({ servings })} />
+
+              <PressableScale
+                accessibilityRole="button"
+                accessibilityLabel={t.cancel}
+                style={sheetStyles.closeRow}
+                onPress={onClose}
               >
                 <Text style={styles.ghostButtonText}>{t.cancel}</Text>
-              </Pressable>
-              <Pressable accessibilityRole="button" style={styles.primaryButton} onPress={saveName}>
-                <Text style={styles.primaryButtonText}>{t.save}</Text>
-              </Pressable>
-            </View>
-          </>
-        ) : (
-          <>
-            <Text style={styles.sectionTitle}>{t.searchReplace}</Text>
-            <TextInput
-              accessibilityLabel={t.searchPlaceholder}
-              style={styles.input}
-              value={searchQuery}
-              onChangeText={(v) => {
-                setSearchQuery(v);
-                void runSearch(v);
-              }}
-              autoFocus
-              placeholder={t.searchPlaceholder}
-            />
-            <ScrollView style={sheetStyles.searchResults}>
-              {searchResults.map((result) => (
-                <Pressable
-                  key={result.recipeId}
+              </PressableScale>
+            </>
+          ) : mode === 'editName' ? (
+            <>
+              <Text style={sheetStyles.sheetTitle}>{t.edit}</Text>
+              <Field label={t.mealName}>
+                <TextInput
+                  accessibilityLabel={t.mealName}
+                  style={styles.input}
+                  value={nameDraft}
+                  onChangeText={setNameDraft}
+                  autoFocus
+                  placeholder={t.mealName}
+                  placeholderTextColor={colors.inkSoft}
+                />
+              </Field>
+              <View style={sheetStyles.actions}>
+                <PressableScale
                   accessibilityRole="button"
-                  style={sheetStyles.searchRow}
-                  disabled={busy}
-                  onPress={() => replaceWithRecipe(result)}
+                  accessibilityLabel={t.cancel}
+                  style={[styles.ghostButton, sheetStyles.flexButton]}
+                  onPress={() => {
+                    setNameDraft(meal.name);
+                    setMode('details');
+                  }}
                 >
-                  <Text style={styles.mealName}>{result.name}</Text>
-                  {result.dietMismatch ? (
-                    <Text style={styles.error}> · {t.dietMismatch}</Text>
-                  ) : null}
-                </Pressable>
-              ))}
-              {searchResults.length === 0 && searchQuery.trim() ? (
-                <Text style={styles.subtitle}>No recipes found.</Text>
-              ) : null}
-            </ScrollView>
-            <Pressable
-              accessibilityRole="button"
-              style={styles.ghostButton}
-              onPress={() => setMode('details')}
-            >
-              <Text style={styles.ghostButtonText}>{t.cancel}</Text>
-            </Pressable>
-          </>
-        )}
-      </View>
+                  <Text style={styles.ghostButtonText}>{t.cancel}</Text>
+                </PressableScale>
+                <PressableScale
+                  accessibilityRole="button"
+                  accessibilityLabel={t.save}
+                  style={[styles.primaryButton, sheetStyles.flexButton]}
+                  onPress={saveName}
+                >
+                  <Text style={styles.primaryButtonText}>{t.save}</Text>
+                </PressableScale>
+              </View>
+            </>
+          ) : (
+            <>
+              <Text style={sheetStyles.sheetTitle}>{t.searchReplace}</Text>
+              <TextInput
+                accessibilityLabel={t.searchPlaceholder}
+                style={styles.input}
+                value={searchQuery}
+                onChangeText={(v) => {
+                  setSearchQuery(v);
+                  void runSearch(v);
+                }}
+                autoFocus
+                placeholder={t.searchPlaceholder}
+                placeholderTextColor={colors.inkSoft}
+              />
+              <ScrollView style={sheetStyles.searchResults} keyboardShouldPersistTaps="handled">
+                {searchResults.map((result) => (
+                  <PressableScale
+                    key={result.recipeId}
+                    accessibilityRole="button"
+                    accessibilityLabel={result.name}
+                    style={sheetStyles.searchRow}
+                    disabled={busy}
+                    onPress={() => replaceWithRecipe(result)}
+                  >
+                    <Text style={sheetStyles.searchName}>{result.name}</Text>
+                    {result.dietMismatch ? (
+                      <Chip label={t.dietMismatch} tint="#FBEAE6" ink={colors.danger} />
+                    ) : null}
+                  </PressableScale>
+                ))}
+                {searchResults.length === 0 && searchQuery.trim() ? (
+                  <Text style={styles.subtitle}>{t.noResults}</Text>
+                ) : null}
+              </ScrollView>
+              <PressableScale
+                accessibilityRole="button"
+                accessibilityLabel={t.cancel}
+                style={styles.ghostButton}
+                onPress={() => setMode('details')}
+              >
+                <Text style={styles.ghostButtonText}>{t.cancel}</Text>
+              </PressableScale>
+            </>
+          )}
+        </View>
+      </FadeSlideIn>
     </View>
   );
 }
@@ -555,26 +680,29 @@ function ServingsEditor({
 }) {
   const t = LABELS[lang];
   const [draft, setDraft] = useState(String(meal.servings));
+  const parsed = parseInt(draft, 10);
+  const canSave = parsed > 0 && parsed !== meal.servings;
   return (
     <View style={sheetStyles.servingsRow}>
-      <Text style={styles.subtitle}>{t.servings}</Text>
+      <Text style={sheetStyles.servingsLabel}>{t.servings}</Text>
       <TextInput
         accessibilityLabel={t.servings}
-        style={servingsStyles.input}
+        style={[styles.input, sheetStyles.servingsInput]}
         value={draft}
         onChangeText={setDraft}
         keyboardType="numeric"
       />
-      <Pressable
+      <PressableScale
         accessibilityRole="button"
-        style={styles.ghostButton}
+        accessibilityLabel={t.save}
+        style={[styles.ghostButton, !canSave && styles.disabled]}
+        disabled={!canSave}
         onPress={() => {
-          const n = parseInt(draft, 10);
-          if (n > 0 && n !== meal.servings) onSave(n);
+          if (canSave) onSave(parsed);
         }}
       >
         <Text style={styles.ghostButtonText}>{t.save}</Text>
-      </Pressable>
+      </PressableScale>
     </View>
   );
 }
@@ -591,37 +719,139 @@ function ConflictSheet({
   onUseLatest: () => void;
 }) {
   const t = LABELS[lang];
+  const accent = mealAccent(current.mealType);
   return (
     <View style={sheetStyles.overlay}>
-      <View style={sheetStyles.sheet}>
-        <Text style={styles.cardTitle}>{t.conflictTitle}</Text>
-        <Text style={styles.subtitle}>{t.conflictBody}</Text>
-        <Card>
-          <Text style={styles.mealType}>{current.mealType}</Text>
-          <Text style={styles.mealName}>{current.name}</Text>
-          <Text style={styles.subtitle}>
-            {t.servings}: {current.servings}
-          </Text>
-        </Card>
-        <View style={sheetStyles.actions}>
-          <Pressable accessibilityRole="button" style={styles.ghostButton} onPress={onClose}>
-            <Text style={styles.ghostButtonText}>{t.cancel}</Text>
-          </Pressable>
-          <Pressable accessibilityRole="button" style={styles.primaryButton} onPress={onUseLatest}>
-            <Text style={styles.primaryButtonText}>{t.useLatest}</Text>
-          </Pressable>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={t.cancel}
+        style={sheetStyles.scrim}
+        onPress={onClose}
+      />
+      <FadeSlideIn from={40} style={sheetStyles.sheetHolder}>
+        <View style={sheetStyles.sheet}>
+          <View style={sheetStyles.grabber} />
+          <Text style={sheetStyles.sheetTitle}>{t.conflictTitle}</Text>
+          <Text style={styles.subtitle}>{t.conflictBody}</Text>
+          <View style={sheetStyles.conflictCard}>
+            <View style={[plan.mealGlyph, { backgroundColor: accent.tint }]}>
+              <Text style={plan.mealGlyphText}>{accent.glyph}</Text>
+            </View>
+            <View style={plan.mealBody}>
+              <Text style={[styles.mealType, { color: accent.label }]}>{current.mealType}</Text>
+              <Text style={plan.mealName}>{current.name}</Text>
+              <Text style={plan.mealMeta}>
+                {t.servings}: {current.servings}
+              </Text>
+            </View>
+          </View>
+          <View style={sheetStyles.actions}>
+            <PressableScale
+              accessibilityRole="button"
+              accessibilityLabel={t.cancel}
+              style={[styles.ghostButton, sheetStyles.flexButton]}
+              onPress={onClose}
+            >
+              <Text style={styles.ghostButtonText}>{t.cancel}</Text>
+            </PressableScale>
+            <PressableScale
+              accessibilityRole="button"
+              accessibilityLabel={t.useLatest}
+              style={[styles.primaryButton, sheetStyles.flexButton]}
+              onPress={onUseLatest}
+            >
+              <Text style={styles.primaryButtonText}>{t.useLatest}</Text>
+            </PressableScale>
+          </View>
         </View>
-      </View>
+      </FadeSlideIn>
     </View>
   );
 }
 
-const dayHeaderStyles = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-});
+const plan = StyleSheet.create({
+  root: { flex: 1, backgroundColor: colors.surface },
 
-const selectedStyles = StyleSheet.create({
-  row: { backgroundColor: '#eff7f4', borderRadius: 8, paddingHorizontal: 8 },
+  stripWrap: { paddingTop: space.sm, paddingBottom: space.md, gap: space.sm },
+  stripLabel: { paddingHorizontal: space.xl },
+  strip: { paddingHorizontal: space.xl, gap: space.sm },
+  day: {
+    width: 54,
+    minHeight: 66,
+    borderRadius: radius.md,
+    backgroundColor: colors.card,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 1,
+  },
+  dayOn: { backgroundColor: colors.accent, borderColor: colors.accent, ...shadow.soft },
+  dayWeekday: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: colors.inkSoft,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  dayNumber: { fontFamily: fonts.display, fontSize: 20, fontWeight: '700', color: colors.ink },
+  dayTextOn: { color: '#FFFFFF' },
+  dot: { width: 5, height: 5, borderRadius: 3, backgroundColor: colors.brand },
+  dotOn: { backgroundColor: colors.turmeric },
+
+  scroll: { paddingHorizontal: space.xl, paddingBottom: space.xxl, gap: space.md },
+  dayHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space.sm,
+  },
+  dayTitle: {
+    flex: 1,
+    fontFamily: fonts.display,
+    fontSize: 23,
+    fontWeight: '700',
+    color: colors.ink,
+  },
+
+  swapBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.brandSoft,
+    padding: space.lg,
+  },
+  swapText: { flex: 1, fontSize: 14, lineHeight: 20, color: colors.brand, fontWeight: '700' },
+
+  meal: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.lg,
+    borderRadius: radius.lg,
+    backgroundColor: colors.card,
+    padding: space.lg,
+    borderWidth: 2,
+    borderColor: 'transparent',
+    ...shadow.soft,
+  },
+  mealSource: { borderColor: colors.brand, backgroundColor: colors.brandSoft },
+  mealTarget: { borderColor: colors.accent, borderStyle: 'dashed' },
+  mealGlyph: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mealGlyphText: { fontSize: 24 },
+  mealBody: { flex: 1, gap: 3 },
+  mealName: { fontFamily: fonts.display, fontSize: 18, lineHeight: 23, color: colors.ink },
+  mealMeta: { fontSize: 12, color: colors.inkSoft },
+  mealTail: { alignItems: 'flex-end', gap: space.xs },
+  chevron: { fontSize: 22, color: colors.inkSoft, lineHeight: 24 },
+
+  weekButton: { marginTop: space.sm },
 });
 
 const sheetStyles = StyleSheet.create({
@@ -631,35 +861,92 @@ const sheetStyles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.4)',
     justifyContent: 'flex-end',
   },
-  sheet: {
-    backgroundColor: '#ffffff',
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    padding: 24,
-    paddingBottom: 40,
-    maxHeight: '85%',
-    gap: 12,
+  scrim: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(28,20,12,0.45)',
   },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  closeBtn: { padding: 8 },
-  mealName: { fontSize: 24, fontWeight: '700', color: '#24352f' },
-  metaRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  actions: { flexDirection: 'row', gap: 8 },
-  searchResults: { maxHeight: 200 },
-  searchRow: { paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#dfe5df' },
-  servingsRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-});
+  sheetHolder: { width: '100%' },
+  sheet: {
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    paddingHorizontal: space.xl,
+    paddingTop: space.md,
+    paddingBottom: space.xl,
+    maxHeight: '88%',
+    gap: space.md,
+  },
+  grabber: {
+    alignSelf: 'center',
+    width: 40,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: colors.border,
+    marginBottom: space.sm,
+  },
+  sheetTitle: { fontFamily: fonts.display, fontSize: 24, fontWeight: '700', color: colors.ink },
 
-const servingsStyles = StyleSheet.create({
-  input: {
-    width: 60,
-    borderWidth: 1,
-    borderColor: '#c8d0c8',
-    borderRadius: 8,
-    padding: 8,
-    fontSize: 16,
+  hero: { flexDirection: 'row', alignItems: 'center', gap: space.lg },
+  heroGlyph: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  heroGlyphText: { fontSize: 32 },
+  heroText: { flex: 1, gap: 3 },
+  mealName: {
+    fontFamily: fonts.display,
+    fontSize: 25,
+    lineHeight: 30,
+    fontWeight: '700',
+    color: colors.ink,
+  },
+
+  actionGrid: { flexDirection: 'row', gap: space.sm },
+  // Three buttons share one row, so the label sets smaller than a full-width
+  // ghost button to stay on a single line at the longest translation.
+  gridButton: { flex: 1, paddingHorizontal: space.xs },
+  gridButtonText: { fontSize: 13 },
+  actions: { flexDirection: 'row', gap: space.sm },
+  flexButton: { flex: 1 },
+  closeRow: {
+    alignItems: 'center',
+    paddingVertical: space.md,
+    minHeight: 44,
+    justifyContent: 'center',
+  },
+
+  searchResults: { maxHeight: 260 },
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space.sm,
+    minHeight: 48,
+    paddingVertical: space.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  searchName: { flex: 1, fontFamily: fonts.display, fontSize: 17, color: colors.ink },
+
+  servingsRow: { flexDirection: 'row', alignItems: 'center', gap: space.md },
+  servingsLabel: { flex: 1, fontSize: 15, fontWeight: '700', color: colors.ink },
+  servingsInput: { width: 74, textAlign: 'center', paddingVertical: 12 },
+
+  conflictCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.lg,
+    borderRadius: radius.lg,
+    backgroundColor: colors.card,
+    padding: space.lg,
   },
 });

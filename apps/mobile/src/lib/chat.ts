@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '@clerk/expo';
-import { useApi } from './api';
+import { devAuthHeaders, useApi } from './api';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
 
@@ -350,6 +350,7 @@ export function useHouseholdChat(householdId: string, ownMembershipId: string | 
           method: 'POST',
           headers: {
             'content-type': contentType,
+            ...devAuthHeaders,
             ...(token ? { authorization: `Bearer ${token}` } : {}),
           },
           body: data as BodyInit,

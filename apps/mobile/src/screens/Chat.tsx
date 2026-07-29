@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
+  Animated,
   FlatList,
   Image,
   KeyboardAvoidingView,
@@ -19,7 +20,21 @@ import {
   useHouseholdChat,
 } from '../lib/chat';
 import { useAuth } from '@clerk/expo';
-import { Loading, Message, colors } from '../components/ui';
+import {
+  Avatar,
+  Chip,
+  Loading,
+  Message,
+  MiniButton,
+  PressableScale,
+  colors,
+  fonts,
+  radius,
+  shadow,
+  space,
+  styles as ui,
+} from '../components/ui';
+import { Mascot } from '../components/Mascot';
 import {
   VOICE_CONTENT_TYPE,
   createReviewPlayer,
@@ -44,6 +59,9 @@ import {
  * - edit and delete of the caller's own messages within the 15-minute window;
  * - the private last-read position, which is updated when Chat is open and the
  *   newest item is visible (never exposed as a read receipt).
+ *
+ * Bubbles are deliberately not animated on mount: FlatList recycles rows, so an
+ * entrance animation would replay every time a message scrolled back into view.
  */
 export function ChatScreen({
   household,
@@ -103,17 +121,31 @@ export function ChatScreen({
 
   return (
     <KeyboardAvoidingView
-      style={styles.flex}
+      style={chatStyles.flex}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
     >
-      <View style={styles.header}>
-        <Pressable accessibilityRole="button" onPress={onBack} style={styles.back}>
-          <Text style={styles.backLink}>‹ {backLabel}</Text>
+      <View style={chatStyles.header}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={backLabel}
+          onPress={onBack}
+          style={chatStyles.back}
+        >
+          <Text style={chatStyles.backChevron}>‹</Text>
         </Pressable>
-        <Text style={styles.headerName} numberOfLines={1}>
-          {household.name}
-        </Text>
+        <Avatar name={household.name} size={38} />
+        <View style={chatStyles.headerText}>
+          <Text style={chatStyles.headerName} numberOfLines={1}>
+            {household.name}
+          </Text>
+          <Text style={chatStyles.headerNote}>Household chat</Text>
+        </View>
+        <Chip
+          label={isCook ? 'Cook' : 'Member'}
+          tint={isCook ? colors.accentSoft : colors.brandSoft}
+          ink={isCook ? colors.accent : colors.brand}
+        />
       </View>
       {isCook ? <CookFocus household={household} /> : null}
       <FlatList<TimelineItem>
@@ -131,17 +163,23 @@ export function ChatScreen({
             resolveToken={getToken}
           />
         )}
-        ItemSeparatorComponent={() => <View style={styles.gap} />}
-        contentContainerStyle={styles.list}
+        ItemSeparatorComponent={() => <View style={chatStyles.gap} />}
+        contentContainerStyle={chatStyles.list}
         refreshing={chat.loading}
         onRefresh={chat.refresh}
         ListEmptyComponent={
           chat.loading ? (
             <Loading />
           ) : chat.error ? (
-            <Text style={styles.hint}>{chat.error}</Text>
+            <Text style={chatStyles.hint}>{chat.error}</Text>
           ) : (
-            <Text style={styles.hint}>No messages yet. Say hello to {household.name}.</Text>
+            <View style={chatStyles.empty}>
+              <Mascot size={132} say="Say hello!" />
+              <Text style={chatStyles.emptyTitle}>No messages yet</Text>
+              <Text style={chatStyles.hint}>
+                This is the one conversation shared by {household.name} and its cooks.
+              </Text>
+            </View>
           )
         }
         onEndReachedThreshold={0.2}
@@ -152,15 +190,13 @@ export function ChatScreen({
         viewabilityConfig={{ itemVisiblePercentThreshold: 50 }}
       />
       {uploadError ? (
-        <View style={styles.uploadErrorBox}>
-          <Text style={styles.uploadErrorText}>{uploadError}</Text>
-          <Pressable
-            accessibilityRole="button"
-            style={styles.minorButton}
+        <View style={chatStyles.uploadErrorBox}>
+          <Text style={chatStyles.uploadErrorText}>{uploadError}</Text>
+          <MiniButton
+            label="Dismiss"
+            accessibilityLabel="Dismiss upload error"
             onPress={() => setUploadError(null)}
-          >
-            <Text style={styles.minorButtonText}>Dismiss</Text>
-          </Pressable>
+          />
         </View>
       ) : null}
       <Outbox items={chat.outbox} onRetry={chat.retry} onCancel={chat.cancel} />
@@ -210,13 +246,93 @@ export function ChatScreen({
  */
 function CookFocus({ household }: { household: HouseholdSummary }) {
   return (
-    <View style={styles.cookCard}>
-      <Text style={styles.eyebrow}>Today's cooking</Text>
-      <Text style={styles.hint}>
-        The confirmed meals for {household.name} today, with Recipe Guides.
-      </Text>
+    <View style={chatStyles.cookCard}>
+      <View style={chatStyles.cookCardText}>
+        <Text style={ui.eyebrow}>Today&apos;s cooking</Text>
+        <Text style={chatStyles.cookCardBody}>
+          The confirmed meals for {household.name} today, with Recipe Guides.
+        </Text>
+      </View>
+      <Mascot size={68} withPet={false} interactive={false} />
     </View>
   );
+}
+
+/** A chat bubble, coloured for own vs others, with an optional "Edited" meta. */
+function Bubble({
+  isOwn,
+  edited,
+  children,
+}: {
+  isOwn: boolean;
+  edited?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <View style={[chatStyles.bubble, isOwn ? chatStyles.bubbleOwn : chatStyles.bubbleTheirs]}>
+      {children}
+      {edited ? <Text style={isOwn ? chatStyles.metaOwn : chatStyles.meta}>Edited</Text> : null}
+    </View>
+  );
+}
+
+/** The body text of a bubble, coloured for own vs others. */
+function BubbleText({ isOwn, children }: { isOwn: boolean; children: ReactNode }) {
+  return (
+    <Text style={isOwn ? chatStyles.bubbleOwnText : chatStyles.bubbleTheirsText}>{children}</Text>
+  );
+}
+
+/** The inline edit affordance shared by message, caption, and transcript edits:
+ *  a field plus a Cancel/Save pair. */
+function InlineEdit({
+  label,
+  value,
+  onChangeText,
+  onCancel,
+  onSave,
+  placeholder,
+  multiline,
+  saveDisabled,
+}: {
+  label: string;
+  value: string;
+  onChangeText: (v: string) => void;
+  onCancel: () => void;
+  onSave: () => void;
+  placeholder?: string;
+  multiline?: boolean;
+  saveDisabled?: boolean;
+}) {
+  return (
+    <View style={chatStyles.editBox}>
+      <TextInput
+        accessibilityLabel={label}
+        style={chatStyles.input}
+        value={value}
+        onChangeText={onChangeText}
+        placeholder={placeholder}
+        placeholderTextColor={colors.inkSoft}
+        multiline={multiline}
+        autoFocus
+      />
+      <View style={chatStyles.editActions}>
+        <MiniButton label="Cancel" accessibilityLabel={`Cancel ${label}`} onPress={onCancel} />
+        <MiniButton
+          label="Save"
+          primary
+          accessibilityLabel={`Save ${label}`}
+          disabled={saveDisabled}
+          onPress={onSave}
+        />
+      </View>
+    </View>
+  );
+}
+
+/** The row of inline actions shown under one's own message. */
+function OwnActions({ children }: { children: ReactNode }) {
+  return <View style={chatStyles.ownActions}>{children}</View>;
 }
 
 function TimelineRow({
@@ -288,20 +404,33 @@ function MessageRow({
   }, [item.messageKind, item.mediaRef, resolveToken]);
 
   // The 15-minute window is enforced on the server; the client hides the
-  // controls once it has clearly passed so a user is not offered an action
-  // that will be rejected (issue 06, AC#11).
-  const withinWindow = useMemo(() => {
-    if (!item.editedAt && !item.serverCreatedAt) return false;
-    const accepted = new Date(item.serverCreatedAt).getTime();
-    return Date.now() - accepted < EDIT_WINDOW_MS;
-  }, [item.editedAt, item.serverCreatedAt]);
+  // controls once it has clearly passed so a user is not offered an action that
+  // will be rejected (issue 06, AC#11). A timer flips `expired` exactly when the
+  // window closes, so a row that stays mounted stops offering the action on time
+  // rather than freezing whatever `Date.now()` read at first render.
+  const acceptedAt = new Date(item.serverCreatedAt).getTime();
+  const [expired, setExpired] = useState(Date.now() - acceptedAt >= EDIT_WINDOW_MS);
+  useEffect(() => {
+    const remaining = acceptedAt + EDIT_WINDOW_MS - Date.now();
+    if (remaining <= 0) {
+      setExpired(true);
+      return;
+    }
+    const id = setTimeout(() => setExpired(true), remaining);
+    return () => clearTimeout(id);
+  }, [acceptedAt]);
+  const withinWindow = !expired;
 
   if (item.deletedAt) {
     return (
       <View
-        style={[styles.bubble, isOwn ? styles.bubbleOwn : styles.bubbleTheirs, styles.tombstone]}
+        style={[
+          chatStyles.bubble,
+          isOwn ? chatStyles.bubbleOwn : chatStyles.bubbleTheirs,
+          chatStyles.tombstone,
+        ]}
       >
-        <Text style={styles.tombstoneText}>Message deleted</Text>
+        <Text style={chatStyles.tombstoneText}>Message deleted</Text>
       </View>
     );
   }
@@ -335,80 +464,53 @@ function MessageRow({
   // ---- Photo message ----
   if (item.messageKind === 'photo') {
     return (
-      <View style={isOwn ? styles.rowOwn : styles.rowTheirs}>
-        {!isOwn ? <Text style={styles.sender}>{senderLabel}</Text> : null}
+      <View style={isOwn ? chatStyles.rowOwn : chatStyles.rowTheirs}>
+        {!isOwn ? <Text style={chatStyles.sender}>{senderLabel}</Text> : null}
         {item.mediaRef ? (
           <Image
             source={{
               uri: mediaUrl(item.mediaRef),
               headers: { Authorization: `Bearer ${imageToken ?? ''}` },
             }}
-            style={styles.photo}
+            style={chatStyles.photo}
             accessibilityLabel="Photo from household chat"
             resizeMode="cover"
           />
         ) : null}
         {editing ? (
-          <View style={styles.editBox}>
-            <TextInput
-              accessibilityLabel="Edit caption"
-              style={styles.input}
-              value={draft}
-              onChangeText={setDraft}
-              placeholder="Add a caption"
-              placeholderTextColor={colors.inkSoft}
-              autoFocus
-            />
-            <View style={styles.editActions}>
-              <Pressable
-                accessibilityRole="button"
-                style={styles.minorButton}
-                onPress={() => {
-                  setDraft(item.caption ?? '');
-                  setEditing(false);
-                }}
-              >
-                <Text style={styles.minorButtonText}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                style={styles.minorButtonPrimary}
-                onPress={commitEditCaption}
-              >
-                <Text style={styles.minorButtonPrimaryText}>Save</Text>
-              </Pressable>
-            </View>
-          </View>
+          <InlineEdit
+            label="Edit caption"
+            value={draft}
+            onChangeText={setDraft}
+            placeholder="Add a caption"
+            onCancel={() => {
+              setDraft(item.caption ?? '');
+              setEditing(false);
+            }}
+            onSave={commitEditCaption}
+          />
         ) : item.caption ? (
-          <View style={[styles.bubble, isOwn ? styles.bubbleOwn : styles.bubbleTheirs]}>
-            <Text style={isOwn ? styles.bubbleOwnText : styles.bubbleTheirsText}>
-              {item.caption}
-            </Text>
-            {item.editedAt ? <Text style={styles.meta}>Edited</Text> : null}
-          </View>
+          <Bubble isOwn={isOwn} edited={Boolean(item.editedAt)}>
+            <BubbleText isOwn={isOwn}>{item.caption}</BubbleText>
+          </Bubble>
         ) : null}
         {isOwn && withinWindow ? (
-          <View style={styles.ownActions}>
-            <Pressable
-              accessibilityRole="button"
-              style={styles.minorButton}
+          <OwnActions>
+            <MiniButton
+              label="Edit caption"
               onPress={() => {
                 setDraft(item.caption ?? '');
                 setEditing(true);
               }}
-            >
-              <Text style={styles.minorButtonText}>Edit caption</Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              style={styles.minorButton}
+            />
+            <MiniButton
+              label="Delete"
+              accessibilityLabel="Delete photo"
               onPress={() => {
                 void onDelete(item.id);
               }}
-            >
-              <Text style={styles.minorButtonText}>Delete</Text>
-            </Pressable>
-          </View>
+            />
+          </OwnActions>
         ) : null}
       </View>
     );
@@ -420,93 +522,72 @@ function MessageRow({
     const isPending = transcript?.status === 'pending';
     const isFailed = transcript?.status === 'failed';
     return (
-      <View style={isOwn ? styles.rowOwn : styles.rowTheirs}>
-        {!isOwn ? <Text style={styles.sender}>{senderLabel}</Text> : null}
-        <View style={[styles.bubble, isOwn ? styles.bubbleOwn : styles.bubbleTheirs]}>
-          <View style={styles.voiceRow}>
-            <Text style={styles.voiceGlyph}>🎤</Text>
-            <Text style={isOwn ? styles.bubbleOwnText : styles.bubbleTheirsText}>Voice note</Text>
+      <View style={isOwn ? chatStyles.rowOwn : chatStyles.rowTheirs}>
+        {!isOwn ? <Text style={chatStyles.sender}>{senderLabel}</Text> : null}
+        <View style={[chatStyles.bubble, isOwn ? chatStyles.bubbleOwn : chatStyles.bubbleTheirs]}>
+          <View style={chatStyles.voiceRow}>
+            <View style={[chatStyles.voiceDisc, isOwn && chatStyles.voiceDiscOwn]}>
+              <Text style={chatStyles.voiceGlyph}>🎤</Text>
+            </View>
+            <View style={chatStyles.voiceMeta}>
+              <BubbleText isOwn={isOwn}>Voice note</BubbleText>
+              {isPending ? (
+                <Text style={isOwn ? chatStyles.metaOwn : chatStyles.meta}>Transcribing…</Text>
+              ) : isFailed ? (
+                <Text style={isOwn ? chatStyles.metaOwn : chatStyles.meta}>
+                  Transcript unavailable
+                </Text>
+              ) : null}
+            </View>
           </View>
-          {isPending ? (
-            <Text style={styles.meta}>Transcribing…</Text>
-          ) : isFailed ? (
-            <Text style={styles.meta}>Transcript unavailable</Text>
-          ) : null}
           {showTranscript && !correcting && item.transcriptText ? (
-            <View style={styles.transcriptBox}>
-              <Text style={styles.transcriptText}>{item.transcriptText}</Text>
+            <View style={chatStyles.transcriptBox}>
+              <Text style={chatStyles.transcriptText}>{item.transcriptText}</Text>
               {item.transcriptAutomatic ? (
-                <Text style={styles.transcriptLabel}>Automatic · may need correction</Text>
+                <Text style={chatStyles.transcriptLabel}>Automatic · may need correction</Text>
               ) : null}
             </View>
           ) : null}
           {correcting ? (
-            <View style={styles.editBox}>
-              <TextInput
-                accessibilityLabel="Correct transcript"
-                style={styles.input}
-                value={transcriptDraft}
-                onChangeText={setTranscriptDraft}
-                multiline
-                autoFocus
-              />
-              <View style={styles.editActions}>
-                <Pressable
-                  accessibilityRole="button"
-                  style={styles.minorButton}
-                  onPress={() => {
-                    setTranscriptDraft(item.transcriptText ?? '');
-                    setCorrecting(false);
-                  }}
-                >
-                  <Text style={styles.minorButtonText}>Cancel</Text>
-                </Pressable>
-                <Pressable
-                  accessibilityRole="button"
-                  style={styles.minorButtonPrimary}
-                  onPress={commitTranscriptCorrection}
-                >
-                  <Text style={styles.minorButtonPrimaryText}>Save</Text>
-                </Pressable>
-              </View>
-            </View>
+            <InlineEdit
+              label="Correct transcript"
+              value={transcriptDraft}
+              onChangeText={setTranscriptDraft}
+              multiline
+              onCancel={() => {
+                setTranscriptDraft(item.transcriptText ?? '');
+                setCorrecting(false);
+              }}
+              onSave={commitTranscriptCorrection}
+            />
           ) : null}
         </View>
         {!correcting && item.transcriptText ? (
-          <View style={styles.ownActions}>
-            <Pressable
-              accessibilityRole="button"
-              style={styles.minorButton}
+          <OwnActions>
+            <MiniButton
+              label={showTranscript ? 'Hide transcript' : 'View transcript'}
               onPress={() => setShowTranscript((v) => !v)}
-            >
-              <Text style={styles.minorButtonText}>
-                {showTranscript ? 'Hide transcript' : 'View transcript'}
-              </Text>
-            </Pressable>
+            />
             {isOwn && withinWindow ? (
-              <Pressable
-                accessibilityRole="button"
-                style={styles.minorButton}
+              <MiniButton
+                label="Correct"
+                accessibilityLabel="Correct transcript"
                 onPress={() => {
                   setTranscriptDraft(item.transcriptText ?? '');
                   setCorrecting(true);
                 }}
-              >
-                <Text style={styles.minorButtonText}>Correct</Text>
-              </Pressable>
+              />
             ) : null}
             {isOwn && withinWindow ? (
-              <Pressable
-                accessibilityRole="button"
-                style={styles.minorButton}
+              <MiniButton
+                label="Delete"
+                accessibilityLabel="Delete voice note"
                 onPress={() => {
                   void onDelete(item.id);
                 }}
-              >
-                <Text style={styles.minorButtonText}>Delete</Text>
-              </Pressable>
+              />
             ) : null}
-          </View>
+          </OwnActions>
         ) : null}
       </View>
     );
@@ -514,65 +595,42 @@ function MessageRow({
 
   // ---- Text message ----
   return (
-    <View style={isOwn ? styles.rowOwn : styles.rowTheirs}>
-      {!isOwn ? <Text style={styles.sender}>{senderLabel}</Text> : null}
+    <View style={isOwn ? chatStyles.rowOwn : chatStyles.rowTheirs}>
+      {!isOwn ? <Text style={chatStyles.sender}>{senderLabel}</Text> : null}
       {editing ? (
-        <View style={styles.editBox}>
-          <TextInput
-            accessibilityLabel="Edit message"
-            style={styles.input}
-            value={draft}
-            onChangeText={setDraft}
-            autoFocus
-          />
-          <View style={styles.editActions}>
-            <Pressable
-              accessibilityRole="button"
-              style={styles.minorButton}
-              onPress={() => {
-                setDraft(item.body ?? '');
-                setEditing(false);
-              }}
-            >
-              <Text style={styles.minorButtonText}>Cancel</Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              style={styles.minorButtonPrimary}
-              onPress={commitEditText}
-            >
-              <Text style={styles.minorButtonPrimaryText}>Save</Text>
-            </Pressable>
-          </View>
-        </View>
+        <InlineEdit
+          label="Edit message"
+          value={draft}
+          onChangeText={setDraft}
+          onCancel={() => {
+            setDraft(item.body ?? '');
+            setEditing(false);
+          }}
+          onSave={commitEditText}
+        />
       ) : (
-        <View style={[styles.bubble, isOwn ? styles.bubbleOwn : styles.bubbleTheirs]}>
-          <Text style={isOwn ? styles.bubbleOwnText : styles.bubbleTheirsText}>{item.body}</Text>
-          {item.editedAt ? <Text style={styles.meta}>Edited</Text> : null}
-        </View>
+        <Bubble isOwn={isOwn} edited={Boolean(item.editedAt)}>
+          <BubbleText isOwn={isOwn}>{item.body}</BubbleText>
+        </Bubble>
       )}
       {isOwn && withinWindow && !editing ? (
-        <View style={styles.ownActions}>
-          <Pressable
-            accessibilityRole="button"
-            style={styles.minorButton}
+        <OwnActions>
+          <MiniButton
+            label="Edit"
+            accessibilityLabel="Edit message"
             onPress={() => {
               setDraft(item.body ?? '');
               setEditing(true);
             }}
-          >
-            <Text style={styles.minorButtonText}>Edit</Text>
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            style={styles.minorButton}
+          />
+          <MiniButton
+            label="Delete"
+            accessibilityLabel="Delete message"
             onPress={() => {
               void onDelete(item.id);
             }}
-          >
-            <Text style={styles.minorButtonText}>Delete</Text>
-          </Pressable>
-        </View>
+          />
+        </OwnActions>
       ) : null}
     </View>
   );
@@ -583,9 +641,9 @@ function EventRow({ item }: { item: Extract<TimelineItem, { kind: 'event' }> }) 
     ? `${roleLabel(item.actor.role)} · ${item.actor.displayName}${item.actor.active ? '' : ' · left'}`
     : null;
   return (
-    <View style={styles.event}>
-      <Text style={styles.eventText}>{item.text}</Text>
-      {actor ? <Text style={styles.eventActor}>{actor}</Text> : null}
+    <View style={chatStyles.event}>
+      <Text style={chatStyles.eventText}>{item.text}</Text>
+      {actor ? <Text style={chatStyles.eventActor}>{actor}</Text> : null}
     </View>
   );
 }
@@ -606,63 +664,56 @@ function Outbox({
 }) {
   if (items.length === 0) return null;
   return (
-    <View style={styles.outbox}>
+    <View style={chatStyles.outbox}>
       {items.map((row) => (
-        <View key={row.localId} style={styles.outboxRow}>
-          <Text style={styles.outboxBody} numberOfLines={2}>
+        <View key={row.localId} style={chatStyles.outboxRow}>
+          <Text style={chatStyles.outboxBody} numberOfLines={2}>
             {row.kind === 'photo' ? '📷 ' : row.kind === 'voice' ? '🎤 ' : ''}
             {row.body}
           </Text>
           {row.state === 'sending' ? (
-            <Text style={styles.stateSending}>Sending…</Text>
+            <Text style={chatStyles.stateSending}>Sending…</Text>
           ) : row.state === 'failed' ? (
             row.failureReason === 'household_access_changed' ? (
               // A removed membership's queued message fails permanently with the
               // specific "Household access changed" label (issue 06, AC#19); it
               // is not retryable.
-              <View style={styles.outboxActions}>
-                <Text style={styles.stateFailed}>Household access changed</Text>
-                <Pressable
-                  accessibilityRole="button"
-                  style={styles.minorButton}
+              <View style={chatStyles.outboxActions}>
+                <Text style={chatStyles.stateFailed}>Household access changed</Text>
+                <MiniButton
+                  label="Dismiss"
+                  accessibilityLabel="Dismiss failed message"
                   onPress={() => onCancel(row.localId)}
-                >
-                  <Text style={styles.minorButtonText}>Dismiss</Text>
-                </Pressable>
+                />
               </View>
             ) : row.kind === 'text' ? (
               // Only text messages can retry inline; photo and voice require
               // re-upload through the composer (ticket 06, AC#6 — a failed
               // upload cannot create an orphaned visible message).
-              <View style={styles.outboxActions}>
-                <Pressable
-                  accessibilityRole="button"
-                  style={styles.minorButtonPrimary}
+              <View style={chatStyles.outboxActions}>
+                <MiniButton
+                  label="Retry"
+                  primary
+                  accessibilityLabel="Retry sending message"
                   onPress={() => onRetry(row.localId)}
-                >
-                  <Text style={styles.minorButtonPrimaryText}>Retry</Text>
-                </Pressable>
-                <Pressable
-                  accessibilityRole="button"
-                  style={styles.minorButton}
+                />
+                <MiniButton
+                  label="Cancel"
+                  accessibilityLabel="Cancel sending message"
                   onPress={() => onCancel(row.localId)}
-                >
-                  <Text style={styles.minorButtonText}>Cancel</Text>
-                </Pressable>
+                />
               </View>
             ) : (
-              <View style={styles.outboxActions}>
-                <Pressable
-                  accessibilityRole="button"
-                  style={styles.minorButton}
+              <View style={chatStyles.outboxActions}>
+                <MiniButton
+                  label="Dismiss"
+                  accessibilityLabel="Dismiss failed upload"
                   onPress={() => onCancel(row.localId)}
-                >
-                  <Text style={styles.minorButtonText}>Dismiss</Text>
-                </Pressable>
+                />
               </View>
             )
           ) : (
-            <Text style={styles.stateSent}>Sent</Text>
+            <Text style={chatStyles.stateSent}>Sent</Text>
           )}
         </View>
       ))}
@@ -695,13 +746,34 @@ function Composer({
   const { pickPhoto } = usePhotoPicker();
   const voice = useVoiceRecording(MAX_VOICE_DURATION_MS);
   const reviewPlayerRef = useRef<ReturnType<typeof createReviewPlayer> | null>(null);
+  const reviewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Clean up the review player when the component unmounts or the recording
-  // is discarded/sent.
+  // A slow pulse behind the record button while recording, so the live state is
+  // visible without watching the timer.
+  const pulse = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (voice.phase !== 'recording') {
+      pulse.setValue(0);
+      return;
+    }
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 1, duration: 750, useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 0, duration: 750, useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [voice.phase, pulse]);
+
+  // Clean up the review player and its end-of-playback timer when the component
+  // unmounts or the recording is discarded/sent.
   useEffect(() => {
     return () => {
       reviewPlayerRef.current?.remove();
       reviewPlayerRef.current = null;
+      if (reviewTimerRef.current) clearTimeout(reviewTimerRef.current);
+      reviewTimerRef.current = null;
     };
   }, []);
 
@@ -763,8 +835,9 @@ function Composer({
 
   function playReview() {
     if (!voice.recordingUri) return;
-    // Clean up any prior player before creating a new one.
+    // Clean up any prior player and pending end-timer before starting a new one.
     reviewPlayerRef.current?.remove();
+    if (reviewTimerRef.current) clearTimeout(reviewTimerRef.current);
     const player = createReviewPlayer(voice.recordingUri);
     reviewPlayerRef.current = player;
     setIsPlayingReview(true);
@@ -773,10 +846,11 @@ function Composer({
     // player does not expose a simple "ended" callback in the current API
     // surface, so we use the known recording duration as an approximation.
     const durationSec = Math.max(1, Math.ceil(voice.durationMs / 1000));
-    setTimeout(() => {
+    reviewTimerRef.current = setTimeout(() => {
       setIsPlayingReview(false);
       player.remove();
       reviewPlayerRef.current = null;
+      reviewTimerRef.current = null;
     }, durationSec * 1000);
   }
 
@@ -787,6 +861,8 @@ function Composer({
     try {
       reviewPlayerRef.current?.remove();
       reviewPlayerRef.current = null;
+      if (reviewTimerRef.current) clearTimeout(reviewTimerRef.current);
+      reviewTimerRef.current = null;
       setIsPlayingReview(false);
       const data = await readFileAsArrayBuffer(voice.recordingUri);
       onSendVoice(data, VOICE_CONTENT_TYPE, voice.durationMs);
@@ -801,6 +877,8 @@ function Composer({
   function discardVoiceRecording() {
     reviewPlayerRef.current?.remove();
     reviewPlayerRef.current = null;
+    if (reviewTimerRef.current) clearTimeout(reviewTimerRef.current);
+    reviewTimerRef.current = null;
     setIsPlayingReview(false);
     voice.discardRecording();
   }
@@ -811,118 +889,121 @@ function Composer({
   // ---- Review state: show playback + send/discard after recording ----
   if (voice.phase === 'reviewing') {
     return (
-      <View style={styles.composer}>
-        <View style={styles.reviewBox}>
-          <Text style={styles.reviewLabel}>
+      <View style={chatStyles.composer}>
+        <View style={chatStyles.reviewBox}>
+          <Text style={chatStyles.reviewLabel}>
             Voice note ready ({formatDuration(voice.durationMs)})
           </Text>
-          <View style={styles.reviewActions}>
-            <Pressable
-              accessibilityRole="button"
+          <View style={chatStyles.reviewActions}>
+            <MiniButton
+              label={isPlayingReview ? '▶ Playing…' : '▶ Play'}
               accessibilityLabel={isPlayingReview ? 'Playing review' : 'Play voice note'}
-              style={styles.minorButton}
               disabled={isPlayingReview}
               onPress={playReview}
-            >
-              <Text style={styles.minorButtonText}>
-                {isPlayingReview ? '▶ Playing…' : '▶ Play'}
-              </Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
+            />
+            <MiniButton
+              label="Discard"
               accessibilityLabel="Discard voice note"
-              style={styles.minorButton}
               onPress={discardVoiceRecording}
-            >
-              <Text style={styles.minorButtonText}>Discard</Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
+            />
+            <MiniButton
+              label={sendingVoice ? 'Sending…' : 'Send voice'}
+              primary
               accessibilityLabel="Send voice note"
-              style={[styles.minorButtonPrimary, sendingVoice && styles.sendDisabled]}
               disabled={sendingVoice}
               onPress={() => void sendVoiceRecording()}
-            >
-              <Text style={styles.minorButtonPrimaryText}>
-                {sendingVoice ? 'Sending…' : 'Send voice'}
-              </Text>
-            </Pressable>
+            />
           </View>
         </View>
       </View>
     );
   }
 
+  const canSend = Boolean(draft.trim()) && !disabled;
+
   return (
-    <View style={styles.composer}>
+    <View style={chatStyles.composer}>
       {mediaError || showVoicePermissionError ? (
-        <View style={styles.uploadErrorBox}>
-          <Text style={styles.uploadErrorText}>
+        <View style={chatStyles.uploadErrorBox}>
+          <Text style={chatStyles.uploadErrorText}>
             {mediaError ?? 'Microphone permission is needed to record voice notes.'}
           </Text>
-          <Pressable
-            accessibilityRole="button"
-            style={styles.minorButton}
-            onPress={() => {
-              setMediaError(null);
-            }}
-          >
-            <Text style={styles.minorButtonText}>Dismiss</Text>
-          </Pressable>
+          <MiniButton
+            label="Dismiss"
+            accessibilityLabel="Dismiss media error"
+            onPress={() => setMediaError(null)}
+          />
         </View>
       ) : null}
       {showCaption ? (
-        <View style={styles.captionBox}>
+        <View style={chatStyles.captionBox}>
           <TextInput
             accessibilityLabel="Photo caption"
-            style={styles.input}
+            style={chatStyles.input}
             placeholderTextColor={colors.inkSoft}
             placeholder="Add a caption (optional)"
             value={captionDraft}
             onChangeText={setCaptionDraft}
             autoFocus
           />
-          <View style={styles.editActions}>
-            <Pressable accessibilityRole="button" style={styles.minorButton} onPress={cancelPhoto}>
-              <Text style={styles.minorButtonText}>Cancel</Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              style={styles.minorButtonPrimary}
+          <View style={chatStyles.editActions}>
+            <MiniButton label="Cancel" accessibilityLabel="Cancel photo" onPress={cancelPhoto} />
+            <MiniButton
+              label="Send photo"
+              primary
+              accessibilityLabel="Send photo"
               onPress={sendPhotoWithCaption}
-            >
-              <Text style={styles.minorButtonPrimaryText}>Send photo</Text>
-            </Pressable>
+            />
           </View>
         </View>
       ) : (
-        <View style={styles.composerRow}>
-          <Pressable
+        <View style={chatStyles.composerRow}>
+          <PressableScale
             accessibilityRole="button"
             accessibilityLabel="Pick photo from library"
-            style={[styles.mediaButton, disabled && styles.sendDisabled]}
+            style={[chatStyles.mediaButton, disabled && chatStyles.sendDisabled]}
             disabled={disabled}
             onPress={() => void pickPhotoNative()}
           >
-            <Text style={styles.mediaGlyph}>📷</Text>
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={
-              voice.phase === 'recording' ? 'Stop recording' : 'Record voice note'
-            }
-            style={[styles.mediaButton, voice.phase === 'recording' && styles.recordActive]}
-            disabled={disabled}
-            onPress={() => void handleRecordPress()}
-          >
-            <Text style={styles.mediaGlyph}>{voice.phase === 'recording' ? '⏹' : '🎤'}</Text>
-          </Pressable>
+            <Text style={chatStyles.mediaGlyph}>📷</Text>
+          </PressableScale>
+
+          <View>
+            {voice.phase === 'recording' ? (
+              <Animated.View
+                style={[
+                  chatStyles.recordPulse,
+                  {
+                    opacity: pulse.interpolate({ inputRange: [0, 1], outputRange: [0.45, 0] }),
+                    transform: [
+                      { scale: pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.55] }) },
+                    ],
+                  },
+                ]}
+              />
+            ) : null}
+            <PressableScale
+              accessibilityRole="button"
+              accessibilityLabel={
+                voice.phase === 'recording' ? 'Stop recording' : 'Record voice note'
+              }
+              style={[
+                chatStyles.mediaButton,
+                voice.phase === 'recording' && chatStyles.recordActive,
+              ]}
+              disabled={disabled}
+              onPress={() => void handleRecordPress()}
+            >
+              <Text style={chatStyles.mediaGlyph}>{voice.phase === 'recording' ? '⏹' : '🎤'}</Text>
+            </PressableScale>
+          </View>
+
           {voice.phase === 'recording' ? (
-            <Text style={styles.recordTime}>{formatDuration(voice.durationMs)} / 2:00</Text>
+            <Text style={chatStyles.recordTime}>{formatDuration(voice.durationMs)} / 2:00</Text>
           ) : (
             <TextInput
               accessibilityLabel="Message"
-              style={styles.input}
+              style={chatStyles.input}
               placeholderTextColor={colors.inkSoft}
               placeholder="Message the household"
               value={draft}
@@ -932,15 +1013,15 @@ function Composer({
             />
           )}
           {voice.phase === 'recording' ? null : (
-            <Pressable
+            <PressableScale
               accessibilityRole="button"
               accessibilityLabel="Send message"
-              style={[styles.send, (!draft.trim() || disabled) && styles.sendDisabled]}
-              disabled={!draft.trim() || disabled}
+              style={[chatStyles.send, !canSend && chatStyles.sendDisabled]}
+              disabled={!canSend}
               onPress={submit}
             >
-              <Text style={styles.sendText}>Send</Text>
-            </Pressable>
+              <Text style={chatStyles.sendGlyph}>↑</Text>
+            </PressableScale>
           )}
         </View>
       )}
@@ -954,165 +1035,210 @@ function roleLabel(role: string): string {
   return 'Member';
 }
 
-const styles = StyleSheet.create({
+const chatStyles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: colors.surface },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 16,
-    paddingTop: 56,
-    paddingBottom: 12,
+    gap: space.md,
+    paddingHorizontal: space.lg,
+    paddingTop: 58,
+    paddingBottom: space.md,
     backgroundColor: colors.surface,
   },
-  back: { minHeight: 44, justifyContent: 'center' },
-  backLink: { color: colors.accent, fontSize: 17, fontWeight: '700' },
-  headerName: { fontSize: 18, fontWeight: '700', color: colors.ink, flex: 1 },
+  back: { minHeight: 44, minWidth: 28, alignItems: 'center', justifyContent: 'center' },
+  backChevron: { color: colors.accent, fontSize: 30, fontWeight: '700', lineHeight: 34 },
+  headerText: { flex: 1 },
+  headerName: { fontFamily: fonts.display, fontSize: 18, fontWeight: '700', color: colors.ink },
+  headerNote: { fontSize: 12, color: colors.inkSoft, marginTop: 1 },
+
   cookCard: {
-    marginHorizontal: 16,
-    marginBottom: 8,
-    padding: 12,
-    borderRadius: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    marginHorizontal: space.lg,
+    marginBottom: space.sm,
+    paddingLeft: space.lg,
+    paddingRight: space.sm,
+    paddingVertical: space.sm,
+    borderRadius: radius.lg,
     backgroundColor: colors.accentSoft,
-    gap: 2,
   },
-  eyebrow: { fontSize: 12, fontWeight: '700', color: colors.brand, textTransform: 'uppercase' },
-  list: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 16 },
-  gap: { height: 10 },
+  cookCardText: { flex: 1, gap: 2 },
+  cookCardBody: { fontSize: 13, lineHeight: 18, color: colors.ink },
+
+  list: { paddingHorizontal: space.lg, paddingTop: space.md, paddingBottom: space.lg },
+  gap: { height: space.md },
+  empty: { alignItems: 'center', paddingTop: space.xl, gap: space.sm },
+  emptyTitle: { fontFamily: fonts.display, fontSize: 22, fontWeight: '700', color: colors.ink },
+
   rowOwn: { alignItems: 'flex-end' },
   rowTheirs: { alignItems: 'flex-start' },
-  sender: { fontSize: 12, color: colors.inkSoft, marginBottom: 4, marginLeft: 2 },
-  bubble: { maxWidth: '82%', borderRadius: 14, paddingVertical: 9, paddingHorizontal: 13 },
-  bubbleOwn: { backgroundColor: colors.accent },
-  bubbleOwnText: { color: '#fff', fontSize: 16, lineHeight: 21 },
-  bubbleTheirs: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border },
-  bubbleTheirsText: { color: colors.ink, fontSize: 16, lineHeight: 21 },
-  meta: { color: 'rgba(255,255,255,0.8)', fontSize: 11, marginTop: 2 },
-  tombstone: { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.border },
-  tombstoneText: { color: colors.inkSoft, fontStyle: 'italic' },
-  ownActions: { flexDirection: 'row', gap: 6, marginTop: 4 },
-  minorButton: {
-    borderRadius: 6,
-    paddingVertical: 5,
-    paddingHorizontal: 10,
-    backgroundColor: colors.field,
-    minHeight: 32,
-    justifyContent: 'center',
+  sender: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.inkSoft,
+    marginBottom: 4,
+    marginLeft: 4,
   },
-  minorButtonText: { color: colors.ink, fontSize: 13, fontWeight: '700' },
-  minorButtonPrimary: {
-    borderRadius: 6,
-    paddingVertical: 5,
-    paddingHorizontal: 10,
-    backgroundColor: colors.accent,
-    minHeight: 32,
-    justifyContent: 'center',
+
+  // One squared corner on the sender's side gives each bubble a tail without
+  // drawing one.
+  bubble: { maxWidth: '82%', borderRadius: radius.lg, paddingVertical: 11, paddingHorizontal: 15 },
+  bubbleOwn: { backgroundColor: colors.accent, borderBottomRightRadius: 6, ...shadow.soft },
+  bubbleOwnText: { color: '#FFFFFF', fontSize: 16, lineHeight: 22 },
+  bubbleTheirs: {
+    backgroundColor: colors.card,
+    borderBottomLeftRadius: 6,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
-  minorButtonPrimaryText: { color: '#fff', fontSize: 13, fontWeight: '700' },
-  editBox: { maxWidth: '82%', gap: 6 },
-  editActions: { flexDirection: 'row', gap: 6 },
+  bubbleTheirsText: { color: colors.ink, fontSize: 16, lineHeight: 22 },
+  meta: { color: colors.inkSoft, fontSize: 11, marginTop: 3 },
+  metaOwn: { color: 'rgba(255,255,255,0.82)', fontSize: 11, marginTop: 3 },
+  tombstone: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: colors.border,
+  },
+  tombstoneText: { color: colors.inkSoft, fontStyle: 'italic', fontSize: 14 },
+
+  ownActions: { flexDirection: 'row', gap: space.xs, marginTop: space.xs },
+  editBox: { maxWidth: '86%', gap: space.sm },
+  editActions: { flexDirection: 'row', gap: space.sm },
+
   event: {
     alignSelf: 'center',
     maxWidth: '90%',
-    backgroundColor: colors.field,
-    borderRadius: 10,
-    paddingVertical: 6,
-    paddingHorizontal: 12,
+    backgroundColor: colors.surfaceDeep,
+    borderRadius: radius.pill,
+    paddingVertical: 7,
+    paddingHorizontal: space.lg,
     alignItems: 'center',
-    gap: 2,
+    gap: 1,
   },
-  eventText: { color: colors.ink, fontSize: 13, textAlign: 'center' },
-  eventActor: { color: colors.inkSoft, fontSize: 11 },
-  outbox: { paddingHorizontal: 16, paddingVertical: 6, backgroundColor: colors.surface },
+  eventText: { color: colors.inkSoft, fontSize: 13, textAlign: 'center' },
+  eventActor: { color: colors.inkSoft, fontSize: 11, opacity: 0.8 },
+
+  outbox: { paddingHorizontal: space.lg, paddingVertical: space.sm },
   outboxRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 8,
-    paddingVertical: 4,
+    gap: space.sm,
+    paddingVertical: space.xs,
   },
   outboxBody: { flex: 1, color: colors.inkSoft, fontSize: 14, fontStyle: 'italic' },
-  outboxActions: { flexDirection: 'row', gap: 6 },
+  outboxActions: { flexDirection: 'row', gap: space.xs, alignItems: 'center' },
   stateSending: { color: colors.inkSoft, fontSize: 12 },
   stateSent: { color: colors.accent, fontSize: 12, fontWeight: '700' },
   stateFailed: { color: colors.danger, fontSize: 12, fontWeight: '700' },
+
   uploadErrorBox: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    backgroundColor: colors.card,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
+    gap: space.sm,
+    marginBottom: space.sm,
+    paddingHorizontal: space.lg,
+    paddingVertical: space.md,
+    borderRadius: radius.md,
+    backgroundColor: '#FBEAE6',
   },
-  uploadErrorText: { flex: 1, color: colors.danger, fontSize: 14 },
+  uploadErrorText: { flex: 1, color: colors.danger, fontSize: 14, lineHeight: 19 },
+
   composer: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 20,
+    paddingHorizontal: space.lg,
+    paddingTop: space.md,
+    paddingBottom: space.xl,
     backgroundColor: colors.card,
     borderTopWidth: 1,
     borderTopColor: colors.border,
   },
-  composerRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: 8,
-  },
-  captionBox: { gap: 8 },
-  reviewBox: { gap: 8, paddingVertical: 4 },
+  composerRow: { flexDirection: 'row', alignItems: 'flex-end', gap: space.sm },
+  captionBox: { gap: space.sm },
+  reviewBox: { gap: space.sm, paddingVertical: space.xs },
   reviewLabel: { fontSize: 15, fontWeight: '700', color: colors.ink },
-  reviewActions: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
+  reviewActions: { flexDirection: 'row', gap: space.sm, flexWrap: 'wrap' },
+
   mediaButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 10,
-    backgroundColor: colors.field,
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: colors.surfaceDeep,
     alignItems: 'center',
     justifyContent: 'center',
   },
   mediaGlyph: { fontSize: 20 },
   recordActive: { backgroundColor: colors.danger },
+  recordPulse: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: colors.danger,
+  },
   recordTime: {
     flex: 1,
-    fontSize: 18,
+    fontSize: 19,
     fontWeight: '700',
     color: colors.danger,
     textAlign: 'center',
   },
-  photo: {
-    width: 240,
-    height: 180,
-    borderRadius: 14,
-    backgroundColor: colors.field,
+
+  photo: { width: 248, height: 186, borderRadius: radius.lg, backgroundColor: colors.field },
+  voiceRow: { flexDirection: 'row', alignItems: 'center', gap: space.md },
+  voiceDisc: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: colors.surfaceDeep,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  voiceRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  voiceGlyph: { fontSize: 20 },
-  transcriptBox: { marginTop: 6, padding: 8, borderRadius: 8, backgroundColor: 'rgba(0,0,0,0.06)' },
-  transcriptText: { fontSize: 14, lineHeight: 19, color: colors.ink },
-  transcriptLabel: { fontSize: 11, color: colors.inkSoft, marginTop: 4, fontStyle: 'italic' },
+  voiceDiscOwn: { backgroundColor: 'rgba(255,255,255,0.22)' },
+  voiceGlyph: { fontSize: 17 },
+  voiceMeta: { gap: 1 },
+  transcriptBox: {
+    marginTop: space.sm,
+    padding: space.md,
+    borderRadius: radius.sm,
+    backgroundColor: 'rgba(0,0,0,0.06)',
+  },
+  transcriptText: { fontSize: 14, lineHeight: 20, color: colors.ink },
+  transcriptLabel: {
+    fontSize: 11,
+    color: colors.inkSoft,
+    marginTop: space.xs,
+    fontStyle: 'italic',
+  },
+
   input: {
     flex: 1,
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: colors.border,
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    borderRadius: radius.lg,
+    paddingHorizontal: space.lg,
+    paddingVertical: 12,
     fontSize: 16,
-    backgroundColor: colors.card,
+    backgroundColor: colors.surface,
     color: colors.ink,
+    minHeight: 46,
     maxHeight: 120,
   },
   send: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
     backgroundColor: colors.accent,
-    borderRadius: 10,
-    paddingHorizontal: 18,
-    minHeight: 48,
+    alignItems: 'center',
     justifyContent: 'center',
+    ...shadow.soft,
   },
-  sendDisabled: { opacity: 0.5 },
-  sendText: { color: '#fff', fontWeight: '700', fontSize: 16 },
-  hint: { color: colors.inkSoft, fontSize: 15, padding: 24, textAlign: 'center' },
+  sendGlyph: { color: '#FFFFFF', fontWeight: '700', fontSize: 22, lineHeight: 25 },
+  sendDisabled: { opacity: 0.45 },
+  hint: { color: colors.inkSoft, fontSize: 15, textAlign: 'center', lineHeight: 21 },
 });

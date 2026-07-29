@@ -2,6 +2,16 @@ import { useCallback } from 'react';
 import { useAuth } from '@clerk/expo';
 
 const apiUrl = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
+export const devAuthEnabled = __DEV__ && process.env.EXPO_PUBLIC_COOKLINK_DEV_AUTH === 'true';
+
+export const devAuthHeaders: Record<string, string> = devAuthEnabled
+  ? {
+      'x-clerk-user-id':
+        process.env.EXPO_PUBLIC_COOKLINK_DEV_USER_ID ?? 'cooklink-mobile-dev-owner',
+      'x-cooklink-dev-phone': process.env.EXPO_PUBLIC_COOKLINK_DEV_PHONE ?? '+919999000001',
+      'x-cooklink-dev-name': process.env.EXPO_PUBLIC_COOKLINK_DEV_NAME ?? 'Mobile Dev Owner',
+    }
+  : {};
 
 /**
  * A failed API request. Carries the HTTP status so callers can distinguish a
@@ -25,14 +35,16 @@ export class ApiError extends Error {
 
 export function useApi() {
   const { getToken } = useAuth();
+  const tokenResolver = devAuthEnabled ? null : getToken;
 
   return useCallback(
     async function request<T>(path: string, init?: RequestInit): Promise<T> {
-      const token = await getToken();
+      const token = tokenResolver ? await tokenResolver() : null;
       const res = await fetch(`${apiUrl}${path}`, {
         ...init,
         headers: {
           'content-type': 'application/json',
+          ...devAuthHeaders,
           ...(token ? { authorization: `Bearer ${token}` } : {}),
           ...init?.headers,
         },
@@ -42,6 +54,6 @@ export function useApi() {
       }
       return (await res.json()) as T;
     },
-    [getToken],
+    [tokenResolver],
   );
 }

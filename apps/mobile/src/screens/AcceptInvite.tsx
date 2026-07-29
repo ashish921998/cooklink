@@ -1,8 +1,19 @@
 import { useState } from 'react';
-import { Pressable, ScrollView, Text, TextInput } from 'react-native';
+import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useApi } from '../lib/api';
 import { ApiError } from '../lib/api';
-import { styles } from '../components/ui';
+import {
+  Card,
+  ErrorNote,
+  FadeSlideIn,
+  Field,
+  PressableScale,
+  colors,
+  fonts,
+  space,
+  styles,
+} from '../components/ui';
+import { Mascot } from '../components/Mascot';
 
 /**
  * Accept a phone-bound Household Invite (issue 03 — the mobile half of invite
@@ -85,40 +96,90 @@ export function AcceptInvite({
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.screen}>
-      <Text style={styles.eyebrow}>Invite</Text>
-      <Text style={styles.title}>Accept a household invite</Text>
-      <Text style={styles.subtitle}>
-        Paste the invite token the household owner sent you through WhatsApp.
-      </Text>
-      <TextInput
-        accessibilityLabel="Invite token"
-        style={styles.input}
-        value={token}
-        onChangeText={setToken}
-        placeholder="Invite token"
-        autoCapitalize="none"
-        autoCorrect={false}
-      />
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-      {notice ? <Text style={styles.subtitle}>{notice}</Text> : null}
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Accept invite"
-        style={[styles.primaryButton, busy && styles.disabled]}
-        disabled={busy}
-        onPress={accept}
-      >
-        <Text style={styles.primaryButtonText}>{busy ? 'Accepting' : 'Accept invite'}</Text>
-      </Pressable>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Cancel"
-        style={styles.ghostButton}
-        onPress={onCancel}
-      >
-        <Text style={styles.ghostButtonText}>Cancel</Text>
-      </Pressable>
+    <ScrollView
+      contentContainerStyle={invite.scroll}
+      keyboardShouldPersistTaps="handled"
+      showsVerticalScrollIndicator={false}
+    >
+      <FadeSlideIn>
+        <View style={invite.hero}>
+          <Mascot size={140} say={notice ? 'Welcome!' : 'Almost in!'} />
+        </View>
+      </FadeSlideIn>
+
+      <FadeSlideIn delay={100}>
+        <View style={invite.head}>
+          <Text style={styles.eyebrow}>Invite</Text>
+          <Text style={invite.title}>Join a household</Text>
+          <Text style={styles.subtitle}>
+            Paste the invite token the household owner sent you on WhatsApp.
+          </Text>
+        </View>
+      </FadeSlideIn>
+
+      <FadeSlideIn delay={180}>
+        <Card style={invite.card}>
+          <Field
+            label="Invite token"
+            hint="It only works from the phone number you were invited on."
+          >
+            <TextInput
+              accessibilityLabel="Invite token"
+              style={[styles.input, invite.tokenInput]}
+              value={token}
+              onChangeText={setToken}
+              placeholder="Paste token"
+              placeholderTextColor={colors.inkSoft}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+          </Field>
+          {error ? <ErrorNote>{error}</ErrorNote> : null}
+          {notice ? <Text style={invite.notice}>{notice}</Text> : null}
+          <PressableScale
+            accessibilityRole="button"
+            accessibilityLabel="Accept invite"
+            style={[styles.primaryButton, busy && styles.disabled]}
+            disabled={busy}
+            onPress={accept}
+          >
+            <Text style={styles.primaryButtonText}>{busy ? 'Joining…' : 'Accept invite'}</Text>
+          </PressableScale>
+          <PressableScale
+            accessibilityRole="button"
+            accessibilityLabel="Cancel"
+            style={styles.ghostButton}
+            onPress={onCancel}
+          >
+            <Text style={styles.ghostButtonText}>Cancel</Text>
+          </PressableScale>
+        </Card>
+      </FadeSlideIn>
     </ScrollView>
   );
 }
+
+const invite = StyleSheet.create({
+  scroll: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    paddingHorizontal: space.xl,
+    paddingVertical: space.xxl,
+    backgroundColor: colors.surface,
+    gap: space.lg,
+  },
+  hero: { alignItems: 'center' },
+  head: { gap: space.xs, alignItems: 'center' },
+  title: {
+    fontFamily: fonts.display,
+    fontSize: 30,
+    lineHeight: 35,
+    fontWeight: '700',
+    color: colors.ink,
+    letterSpacing: -0.3,
+    textAlign: 'center',
+  },
+  card: { gap: space.lg },
+  tokenInput: { fontSize: 15, letterSpacing: 0.5 },
+  notice: { fontSize: 15, fontWeight: '700', color: colors.accent },
+});

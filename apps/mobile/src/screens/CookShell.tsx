@@ -1,15 +1,32 @@
 import { useEffect, useState } from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useAccessProbe, type HouseholdSummary } from '../lib/households';
-import { BottomTabs, Message, styles, type TabKey, type TabSpec } from '../components/ui';
+import {
+  Avatar,
+  BottomTabs,
+  TabBarMinimizeProvider,
+  useTabBarClearance,
+  Chip,
+  FadeSlideIn,
+  PressableScale,
+  colors,
+  fonts,
+  radius,
+  shadow,
+  space,
+  styles,
+  type TabKey,
+  type TabSpec,
+} from '../components/ui';
+import { Mascot, MascotState } from '../components/Mascot';
 import { MealPlanScreen } from './MealPlan';
 import { GroceriesScreen } from './Groceries';
 import { ChatScreen } from './Chat';
 
 const COOK_TABS: readonly TabSpec[] = [
-  { key: 'chat', label: 'Chat', glyph: '💬' },
-  { key: 'mealPlan', label: 'Meal Plan', glyph: '◳' },
-  { key: 'groceries', label: 'Groceries', glyph: '▦' },
+  { key: 'chat', label: 'Chat', icon: 'chat' },
+  { key: 'mealPlan', label: 'Meal Plan', icon: 'calendar' },
+  { key: 'groceries', label: 'Groceries', icon: 'basket' },
 ];
 
 /**
@@ -72,27 +89,48 @@ function CookHouseholdList({
 }) {
   if (households.length === 0) {
     return (
-      <Message
+      <MascotState
         title="No households yet"
         body="You join a household when its owner sends you a Cook invite through WhatsApp."
+        say="Soon!"
       />
     );
   }
   return (
-    <ScrollView contentContainerStyle={styles.screen}>
-      <Text style={styles.eyebrow}>Cook</Text>
-      <Text style={styles.title}>Households</Text>
-      {households.map((household) => (
-        <Pressable
-          key={household.id}
-          accessibilityRole="button"
-          accessibilityLabel={`Open ${household.name} chat`}
-          style={styles.card}
-          onPress={() => onSelect(household.id)}
-        >
-          <Text style={styles.cardTitle}>{household.name}</Text>
-          <Text style={styles.subtitle}>Chat first · Meal Plan · Groceries</Text>
-        </Pressable>
+    <ScrollView contentContainerStyle={cook.scroll} showsVerticalScrollIndicator={false}>
+      <FadeSlideIn>
+        <View style={cook.head}>
+          <View style={cook.headText}>
+            <Text style={styles.eyebrow}>Cook</Text>
+            <Text style={cook.title}>Your kitchens</Text>
+            <Text style={styles.subtitle}>
+              {households.length === 1
+                ? 'One household is waiting for you.'
+                : `${households.length} households are waiting for you.`}
+            </Text>
+          </View>
+          <Mascot size={98} withPet={false} />
+        </View>
+      </FadeSlideIn>
+
+      {households.map((household, i) => (
+        <FadeSlideIn key={household.id} delay={90 + i * 60}>
+          <PressableScale
+            accessibilityRole="button"
+            accessibilityLabel={`Open ${household.name} chat`}
+            style={cook.row}
+            onPress={() => onSelect(household.id)}
+          >
+            <Avatar name={household.name} size={48} />
+            <View style={cook.rowText}>
+              <Text style={cook.rowName} numberOfLines={1}>
+                {household.name}
+              </Text>
+              <Text style={cook.rowNote}>Chat · Meal Plan · Groceries</Text>
+            </View>
+            <Text style={cook.chevron}>›</Text>
+          </PressableScale>
+        </FadeSlideIn>
       ))}
     </ScrollView>
   );
@@ -112,35 +150,111 @@ function CookHousehold({
 }) {
   const [tab, setTab] = useState<TabKey>('chat');
   const { revoked } = useAccessProbe(household.id);
+  const clearance = useTabBarClearance();
 
   // A removed Cook exits immediately with a plain explanation (issue 03).
   if (revoked)
     return (
-      <Message
+      <MascotState
         title="Access changed"
         body={`You no longer cook for ${household.name}. Ask the owner to invite you again.`}
       />
     );
 
   return (
-    <View style={{ flex: 1 }}>
-      {tab === 'chat' ? (
-        <ChatScreen household={household} backLabel="Households" onBack={onBackToList} />
-      ) : tab === 'mealPlan' ? (
-        <MealPlanScreen household={household} />
-      ) : (
-        <GroceriesScreen household={household} />
-      )}
-      <View style={switchStyles.switchRow}>
-        <Pressable accessibilityRole="button" style={styles.ghostButton} onPress={onBackToList}>
-          <Text style={styles.ghostButtonText}>Switch household</Text>
-        </Pressable>
+    <TabBarMinimizeProvider>
+      <View style={cook.root}>
+        {/* Chat carries its own back action; the other two destinations get a
+            household header with the same escape hatch. */}
+        {tab === 'chat' ? (
+          // Chat ends in a composer rather than a scroll, so it cannot reserve
+          // room for the floating bar itself — the shell holds it clear. Its own
+          // edge padding is subtracted so the gap does not double up.
+          <View style={{ flex: 1, paddingBottom: clearance - space.xl }}>
+            <ChatScreen household={household} backLabel="Kitchens" onBack={onBackToList} />
+          </View>
+        ) : (
+          <>
+            <View style={cook.openHeader}>
+              <PressableScale
+                accessibilityRole="button"
+                accessibilityLabel="Back to your kitchens"
+                style={cook.backButton}
+                onPress={onBackToList}
+              >
+                <Text style={styles.backLink}>‹</Text>
+              </PressableScale>
+              <Avatar name={household.name} size={36} />
+              <Text style={cook.openName} numberOfLines={1}>
+                {household.name}
+              </Text>
+              <Chip label="Cook" tint={colors.accentSoft} ink={colors.accent} />
+            </View>
+            {tab === 'mealPlan' ? (
+              <MealPlanScreen household={household} />
+            ) : (
+              <GroceriesScreen household={household} />
+            )}
+          </>
+        )}
+        <BottomTabs tabs={COOK_TABS} active={tab} onSelect={setTab} />
       </View>
-      <BottomTabs tabs={COOK_TABS} active={tab} onSelect={setTab} />
-    </View>
+    </TabBarMinimizeProvider>
   );
 }
 
-const switchStyles = {
-  switchRow: { paddingHorizontal: 24, paddingVertical: 8, backgroundColor: '#f7f3ed' },
-};
+const cook = StyleSheet.create({
+  root: { flex: 1, backgroundColor: colors.surface },
+
+  scroll: {
+    flexGrow: 1,
+    paddingHorizontal: space.xl,
+    paddingTop: 56,
+    paddingBottom: space.xxl,
+    backgroundColor: colors.surface,
+    gap: space.md,
+  },
+  head: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  headText: { flex: 1, gap: space.xs },
+  title: {
+    fontFamily: fonts.display,
+    fontSize: 30,
+    lineHeight: 35,
+    fontWeight: '700',
+    color: colors.ink,
+    letterSpacing: -0.3,
+  },
+
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.lg,
+    borderRadius: radius.lg,
+    backgroundColor: colors.card,
+    padding: space.lg,
+    minHeight: 76,
+    ...shadow.soft,
+  },
+  rowText: { flex: 1, gap: 2 },
+  rowName: { fontFamily: fonts.display, fontSize: 19, fontWeight: '700', color: colors.ink },
+  rowNote: { fontSize: 13, color: colors.inkSoft },
+  chevron: { fontSize: 24, color: colors.inkSoft },
+
+  openHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.md,
+    paddingHorizontal: space.lg,
+    paddingTop: 58,
+    paddingBottom: space.md,
+    backgroundColor: colors.surface,
+  },
+  backButton: { minHeight: 44, minWidth: 28, alignItems: 'center', justifyContent: 'center' },
+  openName: {
+    flex: 1,
+    fontFamily: fonts.display,
+    fontSize: 19,
+    fontWeight: '700',
+    color: colors.ink,
+  },
+});

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Linking, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { Linking, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useApi } from '../lib/api';
 import {
   useAccessProbe,
@@ -9,23 +9,37 @@ import {
   type PlannedMeal,
 } from '../lib/households';
 import {
-  BottomTabs,
+  Avatar,
   Card,
   ChatHeaderAction,
-  Loading,
+  Chip,
+  Divider,
+  FadeSlideIn,
   Message,
+  PotLoader,
+  PressableScale,
+  BottomTabs,
+  TabBarMinimizeProvider,
+  TabScrollView,
+  colors,
+  fonts,
+  mealAccent,
+  radius,
+  shadow,
+  space,
   styles,
   type TabKey,
   type TabSpec,
 } from '../components/ui';
+import { Mascot } from '../components/Mascot';
 import { MealPlanScreen } from './MealPlan';
 import { GroceriesScreen } from './Groceries';
 import { ChatScreen } from './Chat';
 
 const MEMBER_TABS: readonly TabSpec[] = [
-  { key: 'today', label: 'Today', glyph: '◐' },
-  { key: 'mealPlan', label: 'Meal Plan', glyph: '◳' },
-  { key: 'groceries', label: 'Groceries', glyph: '▦' },
+  { key: 'today', label: 'Today', icon: 'plate' },
+  { key: 'mealPlan', label: 'Meal Plan', icon: 'calendar' },
+  { key: 'groceries', label: 'Groceries', icon: 'basket' },
 ];
 
 /**
@@ -58,23 +72,38 @@ export function MemberShell({ household }: { household: HouseholdSummary }) {
   }
 
   return (
-    <View style={{ flex: 1 }}>
-      <View style={headerStyles.header}>
-        <Text style={headerStyles.name} numberOfLines={1}>
-          {household.name}
-        </Text>
-        <ChatHeaderAction onPress={() => setChatOpen(true)} />
+    <TabBarMinimizeProvider>
+      <View style={shell.root}>
+        <View style={shell.header}>
+          <Avatar name={household.name} size={42} />
+          <View style={shell.headerText}>
+            <Text style={shell.headerName} numberOfLines={1}>
+              {household.name}
+            </Text>
+            <Text style={shell.headerRole}>
+              {household.role === 'owner' ? 'Household owner' : 'Household member'}
+            </Text>
+          </View>
+          <ChatHeaderAction onPress={() => setChatOpen(true)} />
+        </View>
+        {tab === 'today' ? (
+          <MemberToday household={household} />
+        ) : tab === 'mealPlan' ? (
+          <MealPlanScreen household={household} />
+        ) : (
+          <GroceriesScreen household={household} />
+        )}
+        <BottomTabs tabs={MEMBER_TABS} active={tab} onSelect={setTab} />
       </View>
-      {tab === 'today' ? (
-        <MemberToday household={household} />
-      ) : tab === 'mealPlan' ? (
-        <MealPlanScreen household={household} />
-      ) : (
-        <GroceriesScreen household={household} />
-      )}
-      <BottomTabs tabs={MEMBER_TABS} active={tab} onSelect={setTab} />
-    </View>
+    </TabBarMinimizeProvider>
   );
+}
+
+function greetingFor(date: Date): string {
+  const hour = date.getHours();
+  if (hour < 12) return 'Good morning';
+  if (hour < 17) return 'Good afternoon';
+  return 'Good evening';
 }
 
 function MemberToday({ household }: { household: HouseholdSummary }) {
@@ -99,41 +128,94 @@ function MemberToday({ household }: { household: HouseholdSummary }) {
     }
   }, [api, household.id, changed]);
 
-  const today = new Date().toISOString().slice(0, 10);
+  const now = new Date();
+  const today = now.toISOString().slice(0, 10);
   const todayMeals = (meals ?? []).filter((m) => m.date === today);
+  const dateLabel = now.toLocaleDateString(undefined, {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+  });
 
   return (
-    <ScrollView contentContainerStyle={{ ...styles.screen, paddingTop: 16 }}>
-      <Text style={styles.eyebrow}>Today</Text>
-      <Card>
-        <Text style={styles.cardTitle}>Today's meals</Text>
-        {meals ? (
-          todayMeals.length > 0 ? (
-            todayMeals.map((meal) => (
-              <View key={meal.id} style={styles.mealRow}>
-                <Text style={styles.mealType}>{meal.mealType}</Text>
-                <Text style={styles.mealName}>
-                  {meal.name}
-                  {meal.isSpecial ? ' · special' : ''}
-                </Text>
-              </View>
-            ))
-          ) : (
-            <Text style={styles.subtitle}>No meals planned for today.</Text>
-          )
-        ) : (
-          <Loading />
-        )}
-      </Card>
+    <TabScrollView contentContainerStyle={today_.scroll} showsVerticalScrollIndicator={false}>
+      {/* The greeting hero: who is cooking, when, and how much is planned. */}
+      <FadeSlideIn>
+        <View style={today_.hero}>
+          <View style={today_.heroText}>
+            <Text style={today_.heroDate}>{dateLabel}</Text>
+            <Text style={today_.heroGreeting}>{greetingFor(now)}</Text>
+            <Text style={today_.heroBody}>
+              {meals === null
+                ? 'Checking the kitchen…'
+                : todayMeals.length > 0
+                  ? `${todayMeals.length} meals planned for today.`
+                  : 'Nothing planned yet for today.'}
+            </Text>
+          </View>
+          <View style={today_.heroMascot}>
+            <Mascot size={112} />
+          </View>
+        </View>
+      </FadeSlideIn>
+
+      <FadeSlideIn delay={90}>
+        <View style={today_.sectionHead}>
+          <Text style={styles.eyebrow}>On the table</Text>
+          <Text style={styles.sectionTitle}>Today&apos;s meals</Text>
+        </View>
+      </FadeSlideIn>
+
+      {meals === null ? (
+        <PotLoader label="Reading the meal plan" />
+      ) : todayMeals.length > 0 ? (
+        todayMeals.map((meal, i) => (
+          <FadeSlideIn key={meal.id} delay={140 + i * 70}>
+            <MealCard meal={meal} />
+          </FadeSlideIn>
+        ))
+      ) : (
+        <FadeSlideIn delay={140}>
+          <Card>
+            <Text style={styles.subtitle}>
+              No meals planned for today. Open Meal Plan to generate the week.
+            </Text>
+          </Card>
+        </FadeSlideIn>
+      )}
+
       {household.role === 'owner' ? (
-        <OwnerMembership
-          household={household}
-          members={members}
-          invites={invites}
-          onChanged={() => setChanged((n) => n + 1)}
-        />
+        <FadeSlideIn delay={260}>
+          <OwnerMembership
+            household={household}
+            members={members}
+            invites={invites}
+            onChanged={() => setChanged((n) => n + 1)}
+          />
+        </FadeSlideIn>
       ) : null}
-    </ScrollView>
+    </TabScrollView>
+  );
+}
+
+/**
+ * One planned meal as a card. The tinted glyph disc carries the meal type in
+ * colour and in shape, so breakfast, lunch, and dinner are distinguishable
+ * without relying on the label alone.
+ */
+function MealCard({ meal }: { meal: PlannedMeal }) {
+  const accent = mealAccent(meal.mealType);
+  return (
+    <View style={today_.mealCard}>
+      <View style={[today_.mealGlyph, { backgroundColor: accent.tint }]}>
+        <Text style={today_.mealGlyphText}>{accent.glyph}</Text>
+      </View>
+      <View style={today_.mealBody}>
+        <Text style={[styles.mealType, { color: accent.label }]}>{meal.mealType}</Text>
+        <Text style={today_.mealName}>{meal.name}</Text>
+      </View>
+      {meal.isSpecial ? <Chip label="Special" tint={colors.brandSoft} ink={colors.brand} /> : null}
+    </View>
   );
 }
 
@@ -260,89 +342,128 @@ function OwnerMembership({
   }
 
   return (
-    <Card>
-      <Text style={styles.cardTitle}>Invite people</Text>
-      <View style={styles.segment}>
-        <Pressable
-          accessibilityRole="button"
-          style={[styles.segmentButton, role === 'cook' && styles.segmentActive]}
-          onPress={() => setRole('cook')}
-        >
-          <Text style={styles.segmentText}>Cook</Text>
-        </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          style={[styles.segmentButton, role === 'member' && styles.segmentActive]}
-          onPress={() => setRole('member')}
-        >
-          <Text style={styles.segmentText}>Member</Text>
-        </Pressable>
+    <View style={owner.wrap}>
+      <View style={today_.sectionHead}>
+        <Text style={styles.eyebrow}>Owner</Text>
+        <Text style={styles.sectionTitle}>Who is in this household</Text>
       </View>
-      <Text style={styles.subtitle}>Send a WhatsApp invite to this phone number.</Text>
-      <InvitePhoneInput value={phone} onChange={setPhoneState} />
-      <Pressable
-        accessibilityRole="button"
-        style={[styles.primaryButton, busy && styles.disabled]}
-        disabled={busy}
-        onPress={createInvite}
-      >
-        <Text style={styles.primaryButtonText}>Create {role} invite</Text>
-      </Pressable>
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-      {notice ? <Text style={styles.subtitle}>{notice}</Text> : null}
+
+      <Card>
+        <Text style={styles.cardTitle}>Invite someone</Text>
+        <View style={styles.segment}>
+          <PressableScale
+            accessibilityRole="button"
+            accessibilityLabel="Invite a cook"
+            accessibilityState={{ selected: role === 'cook' }}
+            style={[styles.segmentButton, role === 'cook' && styles.segmentActive]}
+            onPress={() => setRole('cook')}
+          >
+            <Text style={[styles.segmentText, role === 'cook' && styles.segmentTextActive]}>
+              Cook
+            </Text>
+          </PressableScale>
+          <PressableScale
+            accessibilityRole="button"
+            accessibilityLabel="Invite a member"
+            accessibilityState={{ selected: role === 'member' }}
+            style={[styles.segmentButton, role === 'member' && styles.segmentActive]}
+            onPress={() => setRole('member')}
+          >
+            <Text style={[styles.segmentText, role === 'member' && styles.segmentTextActive]}>
+              Member
+            </Text>
+          </PressableScale>
+        </View>
+        <Text style={styles.subtitle}>
+          Cooklink sends the invite over WhatsApp. It only works from this phone number.
+        </Text>
+        <InvitePhoneInput value={phone} onChange={setPhoneState} />
+        <PressableScale
+          accessibilityRole="button"
+          accessibilityLabel={`Create ${role} invite`}
+          style={[styles.primaryButton, busy && styles.disabled]}
+          disabled={busy}
+          onPress={createInvite}
+        >
+          <Text style={styles.primaryButtonText}>
+            {busy ? 'Creating…' : `Create ${role} invite`}
+          </Text>
+        </PressableScale>
+        {error ? <Text style={styles.error}>{error}</Text> : null}
+        {notice ? <Text style={styles.subtitle}>{notice}</Text> : null}
+      </Card>
 
       {invites.length > 0 ? (
-        <>
-          <Text style={styles.sectionTitle}>Pending invites</Text>
-          {invites.map((invite) => (
-            <View key={invite.id} style={inviteStyles.row}>
-              <Text style={styles.listItem}>
-                {invite.role} · {invite.phoneMasked}
-              </Text>
-              <View style={inviteStyles.actions}>
-                <Pressable
-                  accessibilityRole="button"
-                  style={styles.ghostButton}
-                  disabled={busy}
-                  onPress={() => resend(invite.id)}
-                >
-                  <Text style={styles.ghostButtonText}>Resend</Text>
-                </Pressable>
-                <Pressable
-                  accessibilityRole="button"
-                  style={styles.ghostButton}
-                  disabled={busy}
-                  onPress={() => revoke(invite.id)}
-                >
-                  <Text style={styles.ghostButtonText}>Revoke</Text>
-                </Pressable>
+        <Card>
+          <Text style={styles.cardTitle}>Pending invites</Text>
+          {invites.map((invite, i) => (
+            <View key={invite.id}>
+              {i > 0 ? <Divider /> : null}
+              <View style={owner.row}>
+                <View style={owner.rowText}>
+                  <Chip
+                    label={invite.role}
+                    tint={invite.role === 'cook' ? colors.accentSoft : colors.brandSoft}
+                    ink={invite.role === 'cook' ? colors.accent : colors.brand}
+                  />
+                  <Text style={owner.rowLabel}>{invite.phoneMasked}</Text>
+                </View>
+                <View style={owner.rowActions}>
+                  <PressableScale
+                    accessibilityRole="button"
+                    accessibilityLabel={`Resend invite to ${invite.phoneMasked}`}
+                    style={styles.ghostButton}
+                    disabled={busy}
+                    onPress={() => resend(invite.id)}
+                  >
+                    <Text style={styles.ghostButtonText}>Resend</Text>
+                  </PressableScale>
+                  <PressableScale
+                    accessibilityRole="button"
+                    accessibilityLabel={`Revoke invite to ${invite.phoneMasked}`}
+                    style={styles.ghostButton}
+                    disabled={busy}
+                    onPress={() => revoke(invite.id)}
+                  >
+                    <Text style={[styles.ghostButtonText, { color: colors.danger }]}>Revoke</Text>
+                  </PressableScale>
+                </View>
               </View>
             </View>
           ))}
-        </>
+        </Card>
       ) : null}
 
-      <Text style={styles.sectionTitle}>Household members</Text>
-      {members.map((member) => (
-        <View key={member.id} style={inviteStyles.row}>
-          <Text style={styles.listItem}>
-            {member.role} · {member.notificationDefault}
-          </Text>
-          {member.role !== 'owner' ? (
-            <Pressable
-              accessibilityRole="button"
-              style={styles.ghostButton}
-              disabled={busy}
-              onPress={() => remove(member.id)}
-            >
-              <Text style={styles.ghostButtonText}>Remove</Text>
-            </Pressable>
-          ) : (
-            <Text style={styles.listItem}>owner</Text>
-          )}
-        </View>
-      ))}
-    </Card>
+      <Card>
+        <Text style={styles.cardTitle}>Members and cooks</Text>
+        {members.map((member, i) => (
+          <View key={member.id}>
+            {i > 0 ? <Divider /> : null}
+            <View style={owner.row}>
+              <View style={owner.rowText}>
+                <Chip
+                  label={member.role}
+                  tint={member.role === 'cook' ? colors.accentSoft : colors.brandSoft}
+                  ink={member.role === 'cook' ? colors.accent : colors.brand}
+                />
+                <Text style={owner.rowLabel}>{member.notificationDefault}</Text>
+              </View>
+              {member.role !== 'owner' ? (
+                <PressableScale
+                  accessibilityRole="button"
+                  accessibilityLabel={`Remove ${member.role} access`}
+                  style={styles.ghostButton}
+                  disabled={busy}
+                  onPress={() => remove(member.id)}
+                >
+                  <Text style={[styles.ghostButtonText, { color: colors.danger }]}>Remove</Text>
+                </PressableScale>
+              ) : null}
+            </View>
+          </View>
+        ))}
+      </Card>
+    </View>
   );
 }
 
@@ -362,30 +483,97 @@ function InvitePhoneInput({
       value={value}
       onChangeText={onChange}
       placeholder="+91 phone number"
+      placeholderTextColor={colors.inkSoft}
       keyboardType="phone-pad"
     />
   );
 }
 
-const headerStyles = {
+const shell = StyleSheet.create({
+  root: { flex: 1, backgroundColor: colors.surface },
   header: {
-    flexDirection: 'row' as const,
-    alignItems: 'center' as const,
-    justifyContent: 'space-between' as const,
-    paddingHorizontal: 24,
-    paddingTop: 56,
-    paddingBottom: 12,
-    backgroundColor: '#f7f3ed',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.md,
+    paddingHorizontal: space.xl,
+    paddingTop: 58,
+    paddingBottom: space.md,
+    backgroundColor: colors.surface,
   },
-  name: { fontSize: 20, fontWeight: '700' as const, color: '#24352f', flex: 1, marginRight: 12 },
-};
+  headerText: { flex: 1 },
+  headerName: { fontFamily: fonts.display, fontSize: 20, fontWeight: '700', color: colors.ink },
+  headerRole: { fontSize: 12, color: colors.inkSoft, marginTop: 1 },
+});
 
-const inviteStyles = {
-  row: {
-    flexDirection: 'row' as const,
-    alignItems: 'center' as const,
-    justifyContent: 'space-between' as const,
-    gap: 8,
+const today_ = StyleSheet.create({
+  scroll: {
+    paddingHorizontal: space.xl,
+    paddingTop: space.sm,
+    paddingBottom: space.xxl,
+    gap: space.md,
   },
-  actions: { flexDirection: 'row' as const, gap: 8 },
-};
+
+  hero: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    borderRadius: radius.xl,
+    backgroundColor: colors.brandSoft,
+    paddingLeft: space.xl,
+    paddingTop: space.lg,
+    paddingRight: space.md,
+    ...shadow.soft,
+  },
+  heroText: { flex: 1, paddingBottom: space.xl, paddingRight: space.sm, gap: 2 },
+  heroDate: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: colors.brand,
+    textTransform: 'uppercase',
+    letterSpacing: 1.1,
+  },
+  heroGreeting: {
+    fontFamily: fonts.display,
+    fontSize: 25,
+    lineHeight: 30,
+    fontWeight: '700',
+    color: colors.ink,
+  },
+  heroBody: { fontSize: 14, lineHeight: 20, color: colors.inkSoft, marginTop: 2 },
+  heroMascot: { marginBottom: space.xs },
+
+  sectionHead: { gap: 3, marginTop: space.sm },
+
+  mealCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.lg,
+    borderRadius: radius.lg,
+    backgroundColor: colors.card,
+    padding: space.lg,
+    ...shadow.soft,
+  },
+  mealGlyph: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mealGlyphText: { fontSize: 25 },
+  mealBody: { flex: 1, gap: 3 },
+  mealName: { fontFamily: fonts.display, fontSize: 19, lineHeight: 24, color: colors.ink },
+});
+
+const owner = StyleSheet.create({
+  wrap: { gap: space.md, marginTop: space.sm },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space.sm,
+    paddingVertical: space.md,
+  },
+  rowText: { flexDirection: 'row', alignItems: 'center', gap: space.sm, flex: 1 },
+  rowLabel: { fontSize: 14, color: colors.inkSoft, flexShrink: 1 },
+  rowActions: { flexDirection: 'row', gap: space.sm },
+});

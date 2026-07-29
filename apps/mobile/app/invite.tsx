@@ -1,6 +1,7 @@
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { Redirect, useRouter, useLocalSearchParams } from 'expo-router';
 import { useUser } from '@clerk/expo';
 import { AcceptInvite } from '../src/screens/AcceptInvite';
+import { devAuthEnabled } from '../src/lib/api';
 import { Loading } from '../src/components/ui';
 
 /**
@@ -23,17 +24,19 @@ export default function InviteRoute() {
   const router = useRouter();
   const params = useLocalSearchParams<{ token?: string | string[] }>();
 
-  if (!isLoaded) return <Loading />;
+  if (!devAuthEnabled && !isLoaded) return <Loading />;
 
   const raw = params.token;
   const prefillToken = Array.isArray(raw) ? (raw[0] ?? '') : (raw ?? '');
 
-  if (!isSignedIn) {
-    const target = prefillToken
-      ? `/?pending_invite_token=${encodeURIComponent(prefillToken)}`
-      : '/';
-    router.replace(target);
-    return <Loading />;
+  // Redirect declaratively: navigating from the render body re-enters the
+  // navigator on every render, which trips React's update-depth limit.
+  if (!devAuthEnabled && !isSignedIn) {
+    return (
+      <Redirect
+        href={prefillToken ? `/?pending_invite_token=${encodeURIComponent(prefillToken)}` : '/'}
+      />
+    );
   }
 
   return (
