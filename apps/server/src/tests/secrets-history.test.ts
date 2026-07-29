@@ -28,6 +28,37 @@ function commit(root: string, file: string, content: string, msg = 'commit'): vo
   execSync(`git commit -m "${msg}"`, { cwd: root });
 }
 
+/**
+ * Remove a temp repo created by `makeTempRepo`. `rmSync` can race with
+ * lingering git file handles under parallel test concurrency (observed as
+ * ENOTEMPTY / EBUSY / EPERM on macOS): between `readdir` and `unlink` a git
+ * helper can write or remove a file, leaving the directory non-empty. Retry
+ * with a brief synchronous back-off so a transient lock never fails the
+ * suite. A leaked unique temp dir is harmless (the OS reaps `/tmp` on reboot),
+ * so after the final retry we warn and move on rather than failing.
+ */
+function removeTempRepo(root: string): void {
+  const transient = (code: string | undefined): boolean =>
+    code === 'ENOTEMPTY' || code === 'EBUSY' || code === 'EPERM';
+  for (let attempt = 0; attempt < 10; attempt++) {
+    try {
+      rmSync(root, { recursive: true, force: true });
+      return;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (!transient(code)) throw err;
+      // Brief synchronous back-off so git's file handles release.
+      const until = Date.now() + 50 * (attempt + 1);
+      while (Date.now() < until) {
+        /* spin */
+      }
+    }
+  }
+  console.warn(
+    `secrets-history.test: could not remove temp repo ${root} after retries; leaving it for the OS temp reaper.`,
+  );
+}
+
 test('git history with no secrets produces zero violations', () => {
   const root = makeTempRepo();
   try {
@@ -36,7 +67,7 @@ test('git history with no secrets produces zero violations', () => {
     const violations = grepGitHistory(root);
     assert.equal(violations.length, 0);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    removeTempRepo(root);
   }
 });
 
@@ -53,7 +84,7 @@ test('git history flags a planted high-entropy key literal', () => {
     assert.ok(violations.length >= 1, 'planted Stripe-style key must be flagged');
     assert.ok(violations.some((v) => v.path === 'config.ts'));
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    removeTempRepo(root);
   }
 });
 
@@ -70,7 +101,7 @@ test('git history flags a planted assignment literal', () => {
     const violations = grepGitHistory(root);
     assert.ok(violations.length >= 1, 'planted api_key assignment must be flagged');
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    removeTempRepo(root);
   }
 });
 
@@ -81,7 +112,7 @@ test('git history does not flag a bare variable-name reference', () => {
     const violations = grepGitHistory(root);
     assert.equal(violations.length, 0, 'process.env.DATABASE_URL reference is not a leak');
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    removeTempRepo(root);
   }
 });
 
@@ -92,7 +123,44 @@ test('git history does not flag a placeholder assignment', () => {
     const violations = grepGitHistory(root);
     assert.equal(violations.length, 0, 'placeholder assignment is not a leak');
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    removeTempRepo(root);
+  }
+});
+
+test('git history does not flag the reviewed Clerk test placeholder', () => {
+  // `apps/server/src/tests/auth.test.ts` (commit 6133fa8) sets CLERK_SECRET_KEY
+  // to this exact literal to exercise the missing-publishable-key branch. It
+  // is a reviewed dictionary-word placeholder, not a real key, so the exact
+  // value is allowlisted in KNOWN_PLACEHOLDERS rather than weakening the
+  // HIGH_ENTROPY pattern.
+  const root = makeTempRepo();
+  try {
+    commit(
+      root,
+      'auth.test.ts',
+      "process.env.CLERK_SECRET_KEY = 'sk_test_placeholder';\n",
+      'fixture',
+    );
+    const violations = grepGitHistory(root);
+    assert.equal(violations.length, 0, 'reviewed sk_test_placeholder must be allowlisted');
+  } finally {
+    removeTempRepo(root);
+  }
+});
+
+test('git history still flags a real-shaped Clerk test key (no prefix allowlist)', () => {
+  // Proves the reconciliation does NOT broadly allowlist the `sk_test_` prefix:
+  // only the exact `sk_test_placeholder` string is excluded. A real-shaped key
+  // (mixed case + digits, the entropy real Clerk keys carry) must still be
+  // caught. Built dynamically so no literal secret appears in the test source.
+  const root = makeTempRepo();
+  try {
+    const realish = `sk_test_${'A1'.repeat(8)}`;
+    commit(root, 'auth.test.ts', `const key = '${realish}';\n`, 'leak');
+    const violations = grepGitHistory(root);
+    assert.ok(violations.length >= 1, 'real-shaped Clerk test key must still be flagged');
+  } finally {
+    removeTempRepo(root);
   }
 });
 
