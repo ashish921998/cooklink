@@ -1,0 +1,81 @@
+.argent/flows/profile-chat-recording-20260820.yaml
+  s_b0b70e9f3a2d6e::t_ad5cf82bc4981a 4-14
+  s_b0b70e9f3a2d6e::t_e7fb745a9408da 1-3
+.argent/flows/qa-member-grocery-request-approval.yaml
+  s_c2d38adddb5409::t_6ba56c60762ca8 1-15
+.argent/flows/qa-member-core-navigation.yaml
+  s_c2d38adddb5409::t_c5ae1f9177ef4b 17
+  s_c2d38adddb5409::t_6ba56c60762ca8 1-15,18-25
+  s_c2d38adddb5409::t_fc54a9997626c2 16
+.argent/flows/member-recipe-guide.yaml
+  s_c2d38adddb5409::t_6a6188d65a4ebe 1-18
+.argent/flows/profile-chat-recording-fragment.yaml
+  s_b0b70e9f3a2d6e::t_7871a74e140e11 1-12
+.argent/flows/member-grocery-request-review.yaml
+  s_c2d38adddb5409::t_e4b878bc2c7505 1-15
+.argent/flows/qa-member-instamart-checkout.yaml
+  s_c2d38adddb5409::t_6ba56c60762ca8 1-48
+.argent/flows/qa-member-recipe-guide.yaml
+  s_c2d38adddb5409::t_6ba56c60762ca8 1-7,10-16
+  s_c2d38adddb5409::t_9e2bfd7e0ffeb7 9,18
+  s_c2d38adddb5409::t_a70dfa794c0874 8
+  s_c2d38adddb5409::t_d42626afb8fcfc 17
+.argent/flows/member-instamart-checkout.yaml
+  s_c2d38adddb5409::t_730605c83efd94 40
+  s_c2d38adddb5409::t_1409d67b1bafa3 1-39,41-48
+.argent/flows/member-core-navigation.yaml
+  s_c2d38adddb5409::t_92ebb51f5c1318 4-25
+  s_c2d38adddb5409::t_f0768bead87d4e 1-3
+.argent/flows/qa-onboarding-conversion.yaml
+  s_2a75149a2159ed::t_977aceda6cef39 1-57
+artifacts/store-screenshots/README.md
+  s_1285d15dbd69c1::t_54ff6430284431 1-33
+artifacts/store-screenshots/capture-chat-flow.yaml
+  s_2a75149a2159ed::t_d403967767e185 1-8
+artifacts/store-screenshots/capture-flow.yaml
+  s_2a75149a2159ed::t_efaf5d46aa0f45 1-16
+artifacts/store-screenshots/capture-order-flow.yaml
+  s_2a75149a2159ed::t_a4f629b500f00b 1-18
+artifacts/store-screenshots/compose.mjs
+  s_2a75149a2159ed::t_4da92c762db3b3 1-262
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.23",
+  "base_commit_sha": "817419f579c38ac3d412d86b02af29fce4795d40",
+  "prompts": {},
+  "sessions": {
+    "s_1285d15dbd69c1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a022aa-eeac-7681-8e6a-95100758e7bd",
+        "model": "unknown"
+      },
+      "human_author": "Ashish Huddar <ashish.hudar@gmail.com>"
+    },
+    "s_2a75149a2159ed": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a02328-87b4-78a0-9e29-b6542f8d1fea",
+        "model": "unknown"
+      },
+      "human_author": "Ashish Huddar <ashish.hudar@gmail.com>"
+    },
+    "s_b0b70e9f3a2d6e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0204b-349a-74b0-9dd4-6fa2eb22bb44",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashish Huddar <ashish.hudar@gmail.com>"
+    },
+    "s_c2d38adddb5409": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0220c-3850-7451-9bf2-618031af1f31",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Ashish Huddar <ashish.hudar@gmail.com>"
+    }
+  }
+}
