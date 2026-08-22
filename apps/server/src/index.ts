@@ -5,12 +5,23 @@ import { createLogger } from './logger.js';
 import { initObservability, flushObservability } from './observability.js';
 import { createScheduler } from './scheduler.js';
 import { createMediaStore } from './media.js';
+import { createDatabaseSwiggyTokenStore, createSwiggyProvider } from './provider-swiggy.js';
 
 const port = Number(process.env.PORT ?? 3000);
 const db = createDatabase(process.env.DATABASE_URL);
 const log = createLogger();
 const media = createMediaStore();
-const app = createApp(db, { media, log });
+const swiggyMode = process.env.COOKLINK_SWIGGY_MODE ?? 'stub';
+const provider =
+  swiggyMode === 'stub'
+    ? undefined
+    : createSwiggyProvider({
+        tokenStore: createDatabaseSwiggyTokenStore(db, requiredEnv('SWIGGY_TOKEN_ENCRYPTION_KEY')),
+        baseUrl:
+          process.env.SWIGGY_MCP_BASE_URL ??
+          (swiggyMode === 'staging' ? 'https://mcp-staging.swiggy.com' : 'https://mcp.swiggy.com'),
+      });
+const app = createApp(db, { media, log, provider });
 
 // Structured error capture (issue 07, AC#19). No-op without SENTRY_DSN.
 initObservability();
@@ -32,3 +43,9 @@ async function shutdown(signal: string): Promise<void> {
 }
 process.on('SIGTERM', () => void shutdown('SIGTERM'));
 process.on('SIGINT', () => void shutdown('SIGINT'));
+
+function requiredEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`${name} is required when COOKLINK_SWIGGY_MODE is not stub.`);
+  return value;
+}

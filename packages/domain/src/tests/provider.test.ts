@@ -3,6 +3,7 @@ import test from 'node:test';
 import { id } from '../ids.js';
 import {
   resolveMatchPlan,
+  orderableCartItems,
   buildCartUpdatePlan,
   validateCartReview,
   allResolved,
@@ -36,7 +37,7 @@ function makeCartItem(overrides: Partial<SuggestedCartItem> = {}): SuggestedCart
     needDay: 'today',
     affectedMeals: [],
     confidence: 'may_be_low',
-    memberState: 'pending',
+    memberState: 'kept',
     removalReason: null,
     ...overrides,
   };
@@ -91,6 +92,18 @@ test('resolveMatchPlan: unresolved when no product chosen', () => {
   if (plan[0]!.state === 'unresolved') {
     assert.equal(plan[0]!.candidates.length, 2);
   }
+});
+
+test('orderableCartItems: excludes pending and removed lines', () => {
+  const items = orderableCartItems([
+    makeCartItem({ id: 'kept', memberState: 'kept' }),
+    makeCartItem({ id: 'pending', memberState: 'pending' }),
+    makeCartItem({ id: 'removed', memberState: 'removed', removalReason: 'already_have' }),
+  ]);
+  assert.deepEqual(
+    items.map((item) => item.id),
+    ['kept'],
+  );
 });
 
 test('resolveMatchPlan: resolved when a product is chosen and available', () => {

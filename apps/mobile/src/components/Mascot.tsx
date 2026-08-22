@@ -1,14 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
-import {
-  AccessibilityInfo,
-  Animated,
-  Easing,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AccessibilityInfo, Animated, Easing, Pressable, StyleSheet, View } from 'react-native';
 import { colors, fonts, radius, shadow, space, useSteam } from './ui';
+import { Text } from './Typography';
 
 /**
  * Chotu and Masala — Cooklink's house characters.
@@ -40,11 +33,17 @@ const apronDark = '#0B4834';
 const blush = '#E88F6E';
 const ginger = '#D08A4A';
 const gingerDark = '#B06F35';
+const transparent = 'transparent';
 
 const DRAWING_WIDTH = 140;
 const DRAWING_HEIGHT = 136;
 
 const LINES = ['Namaste!', 'Kya banana hai?', 'Chai first?', 'Sab taiyaar hai!'];
+const PUFF_CONFIG = [
+  { id: 'left', offset: -3 },
+  { id: 'center', offset: 3 },
+  { id: 'right', offset: -3 },
+] as const;
 
 export function Mascot({
   size = DRAWING_WIDTH,
@@ -135,9 +134,8 @@ export function Mascot({
     const all = [breathe, blinking, wagging];
     all.forEach((a) => a.start());
     return () => all.forEach((a) => a.stop());
-    // Depends only on reduceMotion: every Animated.Value here is a useRef
-    // handle that is stable for the component's lifetime.
-  }, [reduceMotion]);
+    // Animated.Value handles are useRef-backed and stable for the component's lifetime.
+  }, [blink, bob, reduceMotion, tail]);
 
   // A persistent `say` shows its bubble immediately; a tap-triggered line
   // fades in, holds, and retires itself.
@@ -152,7 +150,7 @@ export function Mascot({
     }
   }, [say, bubble]);
 
-  function greet() {
+  const greet = useCallback(() => {
     if (!interactive) return;
     setTapLine(LINES[Math.floor(Math.random() * LINES.length)]!);
     Animated.sequence([
@@ -176,7 +174,87 @@ export function Mascot({
       Animated.spring(jump, { toValue: 1, friction: 4, tension: 220, useNativeDriver: true }),
       Animated.spring(jump, { toValue: 0, friction: 6, tension: 180, useNativeDriver: true }),
     ]).start();
-  }
+  }, [bubble, interactive, jump, reduceMotion, say]);
+
+  const puffStyles = useMemo(
+    () =>
+      PUFF_CONFIG.map(({ id, offset }, index) => {
+        const puff = puffs[index]!;
+        return {
+          id,
+          style: [
+            sheet.puff,
+            {
+              opacity: puff.interpolate({
+                inputRange: [0, 0.25, 0.75, 1],
+                outputRange: [0, 0.75, 0.35, 0],
+              }),
+              transform: [
+                { translateY: puff.interpolate({ inputRange: [0, 1], outputRange: [4, -16] }) },
+                {
+                  translateX: puff.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0, offset],
+                  }),
+                },
+                { scale: puff.interpolate({ inputRange: [0, 1], outputRange: [0.5, 1.25] }) },
+              ],
+            },
+          ],
+        };
+      }),
+    [puffs],
+  );
+  const eyeStyle = useMemo(() => [sheet.eye, { transform: [{ scaleY: blink }] }], [blink]);
+  const petTailStyle = useMemo(
+    () => [
+      sheet.petTail,
+      {
+        transform: [
+          { translateY: 8 },
+          {
+            rotate: tail.interpolate({
+              inputRange: [0, 1],
+              outputRange: ['-18deg', '14deg'],
+            }),
+          },
+          { translateY: -8 },
+        ],
+      },
+    ],
+    [tail],
+  );
+  const petEyeStyle = useMemo(() => [sheet.petEye, { transform: [{ scaleY: blink }] }], [blink]);
+  const figureStyle = useMemo(
+    () => ({
+      width: DRAWING_WIDTH * scale,
+      height: DRAWING_HEIGHT * scale,
+      transform: [
+        { scale },
+        {
+          translateY: Animated.add(
+            bob.interpolate({ inputRange: [0, 1], outputRange: [0, -4] }),
+            jump.interpolate({ inputRange: [-1, 0, 1], outputRange: [3, 0, -12] }),
+          ),
+        },
+        { scaleY: jump.interpolate({ inputRange: [-1, 0, 1], outputRange: [0.93, 1, 1.05] }) },
+      ],
+    }),
+    [bob, jump, scale],
+  );
+  const bubbleStyle = useMemo(
+    () => [
+      sheet.bubble,
+      {
+        opacity: bubble,
+        transform: [
+          { scale: bubble.interpolate({ inputRange: [0, 1], outputRange: [0.8, 1] }) },
+          { translateY: bubble.interpolate({ inputRange: [0, 1], outputRange: [6, 0] }) },
+        ],
+      },
+    ],
+    [bubble],
+  );
 
   const bubbleText = tapLine ?? say;
 
@@ -184,29 +262,8 @@ export function Mascot({
     <View style={sheet.drawing}>
       {/* Steam drifting off the top of the toque. */}
       <View style={sheet.steamRow}>
-        {puffs.map((puff, i) => (
-          <Animated.View
-            key={i}
-            style={[
-              sheet.puff,
-              {
-                opacity: puff.interpolate({
-                  inputRange: [0, 0.25, 0.75, 1],
-                  outputRange: [0, 0.75, 0.35, 0],
-                }),
-                transform: [
-                  { translateY: puff.interpolate({ inputRange: [0, 1], outputRange: [4, -16] }) },
-                  {
-                    translateX: puff.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [0, i === 1 ? 3 : -3],
-                    }),
-                  },
-                  { scale: puff.interpolate({ inputRange: [0, 1], outputRange: [0.5, 1.25] }) },
-                ],
-              },
-            ]}
-          />
+        {puffStyles.map(({ id, style }) => (
+          <Animated.View key={id} style={style} />
         ))}
       </View>
 
@@ -221,8 +278,8 @@ export function Mascot({
         <View style={sheet.earLeft} />
         <View style={sheet.earRight} />
         <View style={sheet.eyeRow}>
-          <Animated.View style={[sheet.eye, { transform: [{ scaleY: blink }] }]} />
-          <Animated.View style={[sheet.eye, { transform: [{ scaleY: blink }] }]} />
+          <Animated.View style={eyeStyle} />
+          <Animated.View style={eyeStyle} />
         </View>
         <View style={sheet.blushRow}>
           <View style={sheet.blush} />
@@ -243,30 +300,14 @@ export function Mascot({
       {/* Masala, leaning out from behind Chotu's right leg. */}
       {withPet ? (
         <View style={sheet.pet}>
-          <Animated.View
-            style={[
-              sheet.petTail,
-              {
-                transform: [
-                  { translateY: 8 },
-                  {
-                    rotate: tail.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: ['-18deg', '14deg'],
-                    }),
-                  },
-                  { translateY: -8 },
-                ],
-              },
-            ]}
-          />
+          <Animated.View style={petTailStyle} />
           <View style={sheet.petBody} />
           <View style={sheet.petHead}>
             <View style={sheet.petEarLeft} />
             <View style={sheet.petEarRight} />
             <View style={sheet.petEyeRow}>
-              <Animated.View style={[sheet.petEye, { transform: [{ scaleY: blink }] }]} />
-              <Animated.View style={[sheet.petEye, { transform: [{ scaleY: blink }] }]} />
+              <Animated.View style={petEyeStyle} />
+              <Animated.View style={petEyeStyle} />
             </View>
             <View style={sheet.petNose} />
           </View>
@@ -275,42 +316,12 @@ export function Mascot({
     </View>
   );
 
-  const animatedFigure = (
-    <Animated.View
-      style={{
-        width: DRAWING_WIDTH * scale,
-        height: DRAWING_HEIGHT * scale,
-        transform: [
-          { scale },
-          {
-            translateY: Animated.add(
-              bob.interpolate({ inputRange: [0, 1], outputRange: [0, -4] }),
-              jump.interpolate({ inputRange: [-1, 0, 1], outputRange: [3, 0, -12] }),
-            ),
-          },
-          { scaleY: jump.interpolate({ inputRange: [-1, 0, 1], outputRange: [0.93, 1, 1.05] }) },
-        ],
-      }}
-    >
-      {figure}
-    </Animated.View>
-  );
+  const animatedFigure = <Animated.View style={figureStyle}>{figure}</Animated.View>;
 
   return (
     <View style={sheet.stage}>
       {bubbleText ? (
-        <Animated.View
-          style={[
-            sheet.bubble,
-            {
-              opacity: bubble,
-              transform: [
-                { scale: bubble.interpolate({ inputRange: [0, 1], outputRange: [0.8, 1] }) },
-                { translateY: bubble.interpolate({ inputRange: [0, 1], outputRange: [6, 0] }) },
-              ],
-            },
-          ]}
-        >
+        <Animated.View style={bubbleStyle}>
           <Text style={sheet.bubbleText}>{bubbleText}</Text>
           <View style={sheet.bubbleTail} />
         </Animated.View>
@@ -537,8 +548,8 @@ const sheet = StyleSheet.create({
     borderLeftWidth: 5,
     borderRightWidth: 5,
     borderBottomWidth: 8,
-    borderLeftColor: 'transparent',
-    borderRightColor: 'transparent',
+    borderLeftColor: transparent,
+    borderRightColor: transparent,
     borderBottomColor: ginger,
   },
   petEarRight: {
@@ -550,8 +561,8 @@ const sheet = StyleSheet.create({
     borderLeftWidth: 5,
     borderRightWidth: 5,
     borderBottomWidth: 8,
-    borderLeftColor: 'transparent',
-    borderRightColor: 'transparent',
+    borderLeftColor: transparent,
+    borderRightColor: transparent,
     borderBottomColor: ginger,
   },
   petEyeRow: { flexDirection: 'row', gap: 8, marginTop: 8 },
@@ -580,8 +591,8 @@ const sheet = StyleSheet.create({
     borderLeftWidth: 7,
     borderRightWidth: 7,
     borderTopWidth: 8,
-    borderLeftColor: 'transparent',
-    borderRightColor: 'transparent',
+    borderLeftColor: transparent,
+    borderRightColor: transparent,
     borderTopColor: colors.card,
   },
 

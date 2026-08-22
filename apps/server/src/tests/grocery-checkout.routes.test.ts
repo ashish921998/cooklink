@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createDatabase } from '@cooklink/db';
+import { eq } from 'drizzle-orm';
+import { createDatabase, groceryRequests, memberships } from '@cooklink/db';
 import { createStubProvider } from '../provider-stub.js';
 import { createApp, createInMemoryConfirmationStore } from '../app.js';
 
@@ -50,6 +51,34 @@ test(
       });
       assert.equal(createRes.status, 201);
       const { householdId } = (await createRes.json()) as { householdId: string };
+      const [ownerMembership] = await db
+        .select()
+        .from(memberships)
+        .where(eq(memberships.householdId, householdId))
+        .limit(1);
+      assert.ok(ownerMembership);
+      await db.insert(groceryRequests).values([
+        {
+          id: crypto.randomUUID(),
+          householdId,
+          itemText: 'Tomato',
+          quantityText: '2 packs',
+          status: 'approved',
+          createdById: ownerMembership.id,
+          resolvedById: ownerMembership.id,
+          resolvedAt: new Date(),
+        },
+        {
+          id: crypto.randomUUID(),
+          householdId,
+          itemText: 'Toor Dal',
+          quantityText: '1 pack',
+          status: 'approved',
+          createdById: ownerMembership.id,
+          resolvedById: ownerMembership.id,
+          resolvedAt: new Date(),
+        },
+      ]);
 
       // Invite a Cook so we can verify Cooks are denied checkout (AC#2).
       const inviteRes = await app.request(`/v1/households/${householdId}/invites`, {
@@ -104,39 +133,45 @@ test(
       const addrBody = (await addrRes.json()) as { addresses: { id: string }[] };
       const addressId = addrBody.addresses[0]!.id;
 
-      // Match an unresolved cart line to an exact product (store-1 tomato).
+      // Match both unresolved needs to exact products from separate stores.
       const matchPlanRes = await app.request(
         `/v1/households/${householdId}/grocery-provider/match-plan?addressId=${addressId}`,
         { headers: ownerHeaders },
       );
       const matchPlan = (await matchPlanRes.json()) as {
-        plan: { state: string; cartItem?: { id: string } }[];
+        plan: {
+          state: string;
+          cartItem?: { id: string; freeTextItem: string | null };
+        }[];
       };
-      if (matchPlan.plan.length > 0 && matchPlan.plan[0]!.state === 'unresolved') {
-        const cartItemId = matchPlan.plan[0]!.cartItem!.id;
-        await app.request(`/v1/households/${householdId}/grocery-provider/match`, {
+      assert.equal(matchPlan.plan.length, 2);
+      for (const row of matchPlan.plan) {
+        assert.equal(row.state, 'unresolved');
+        assert.ok(row.cartItem);
+        const isDal = row.cartItem.freeTextItem?.toLowerCase().includes('dal') === true;
+        const matchRes = await app.request(`/v1/households/${householdId}/grocery-provider/match`, {
           method: 'POST',
           headers: ownerHeaders,
           body: JSON.stringify({
-            cartItemId,
-            productId: 'prod-tomato-500',
+            cartItemId: row.cartItem.id,
+            productId: isDal ? 'prod-toordal-500' : 'prod-tomato-500',
             addressId,
-            quantity: 2,
+            quantity: isDal ? 1 : 2,
           }),
         });
+        assert.equal(matchRes.status, 200);
       }
 
-      // Build the Instamart cart directly with a second store item so we have
-      // a multi-store cart for AC#7.
-      await app.request(`/v1/households/${householdId}/grocery-provider/cart/build`, {
-        method: 'POST',
-        headers: ownerHeaders,
-        body: JSON.stringify({
-          addressId,
-          mode: 'replace',
-          // Override the intended items to force two stores.
-        }),
-      });
+      // Build the now-resolved multi-store cart for AC#7.
+      const buildRes = await app.request(
+        `/v1/households/${householdId}/grocery-provider/cart/build`,
+        {
+          method: 'POST',
+          headers: ownerHeaders,
+          body: JSON.stringify({ addressId, mode: 'replace' }),
+        },
+      );
+      assert.equal(buildRes.status, 200);
 
       // AC#1 — the canonical confirmation snapshot: cart, address, selected
       // returned payment method, store count, and total.

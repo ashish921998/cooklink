@@ -65,3 +65,21 @@ test('the publishable Clerk key is allowed, not flagged', () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('the development-only design preview flag is allowed, not flagged', () => {
+  const root = mkdtempSync(join(tmpdir(), 'cooklink-secrets-'));
+  try {
+    writeFileSync(
+      join(root, 'preview.ts'),
+      "export const enabled = __DEV__ && process.env.EXPO_PUBLIC_COOKLINK_DESIGN_PREVIEW === 'true';\n",
+    );
+    const violations = grepMobileSecrets(root);
+    assert.equal(
+      violations.filter((v) => v.file === 'preview.ts').length,
+      0,
+      'the non-secret, __DEV__-guarded preview flag must be allowed',
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

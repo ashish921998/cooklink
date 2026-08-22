@@ -1,6 +1,8 @@
-import { Image, StyleSheet, Text, View } from 'react-native';
+import { Image, StyleSheet, View } from 'react-native';
+import type { ImageStyle, ViewStyle } from 'react-native';
 import brandMark from '../../assets/brand-mark.png';
 import { colors } from './ui';
+import { Text } from './Typography';
 
 type BrandLogoProps = {
   compact?: boolean;
@@ -11,12 +13,12 @@ export function BrandLogo({ compact = false }: BrandLogoProps) {
     <View
       accessibilityRole="image"
       accessibilityLabel="Cooklink"
-      style={[styles.lockup, compact && styles.lockupCompact]}
+      style={compact ? compactLockupStyle : styles.lockup}
     >
       <Image
         source={brandMark}
         resizeMode="contain"
-        style={[styles.mark, compact && styles.markCompact]}
+        style={compact ? compactMarkStyle : styles.mark}
       />
       {!compact ? <Text style={styles.wordmark}>cooklink</Text> : null}
     </View>
@@ -49,3 +51,12 @@ const styles = StyleSheet.create({
     letterSpacing: -1,
   },
 });
+
+const compactLockupStyle = StyleSheet.compose<ViewStyle, ViewStyle, ViewStyle>(
+  styles.lockup,
+  styles.lockupCompact,
+);
+const compactMarkStyle = StyleSheet.compose<ImageStyle, ImageStyle, ImageStyle>(
+  styles.mark,
+  styles.markCompact,
+);

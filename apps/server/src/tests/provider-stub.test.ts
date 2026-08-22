@@ -102,6 +102,18 @@ test('stub provider: empty cart returns null review', async () => {
   assert.equal(review, null);
 });
 
+test('stub provider: clearCart removes every item', async () => {
+  const provider = createStubProvider();
+  await connect(provider);
+  await provider.updateCart({
+    memberUserId: USER,
+    addressId: 'addr-home',
+    items: [{ productId: 'prod-tomato-500', quantity: 1 }],
+  });
+  await provider.clearCart(USER, 'addr-home');
+  assert.equal(await provider.getCart(USER, 'addr-home'), null);
+});
+
 test('stub provider: updateCart builds a review with bill and payment methods', async () => {
   const provider = createStubProvider();
   await connect(provider);

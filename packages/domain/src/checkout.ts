@@ -13,8 +13,11 @@ import type { ProviderCartReview, ProviderOrder } from './provider.js';
 
 /** ₹1,000 in paise (the conservative V1 boundary). */
 export const CART_VALUE_LIMIT_CENTS = 100_000;
+/** Instamart's documented minimum order value: ₹99 in paise. */
+export const CART_VALUE_MINIMUM_CENTS = 9_900;
 
-export type CheckoutDecisionReason = 'eligible' | 'over_limit' | 'no_payment_method' | 'disabled';
+export type CheckoutDecisionReason =
+  'eligible' | 'min_order_not_met' | 'over_limit' | 'no_payment_method' | 'disabled';
 
 export interface CheckoutDecision {
   eligible: boolean;
@@ -25,6 +28,7 @@ export interface CheckoutDecision {
 
 /**
  * Decide whether a cart may complete through Cooklink Checkout (issue 01).
+ * - total below ₹99 → keep reviewing the cart;
  * - total at or above ₹1,000 → Instamart app fallback;
  * - no payment method returned by the cart → Instamart app fallback;
  * - otherwise eligible (subject to the production feature gate).
@@ -36,6 +40,9 @@ export function decideCheckout(
 ): CheckoutDecision {
   if (!orderingEnabled) {
     return { eligible: false, reason: 'disabled', fallback: null };
+  }
+  if (totalCents < CART_VALUE_MINIMUM_CENTS) {
+    return { eligible: false, reason: 'min_order_not_met', fallback: null };
   }
   if (totalCents >= CART_VALUE_LIMIT_CENTS) {
     return { eligible: false, reason: 'over_limit', fallback: 'instamart_app' };

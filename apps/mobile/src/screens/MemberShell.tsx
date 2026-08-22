@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react';
-import { Linking, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Image, Linking, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApi } from '../lib/api';
+import { mealImage } from '../lib/meal-images';
 import {
   useAccessProbe,
   type HouseholdMember,
@@ -23,24 +25,28 @@ import {
   TabScrollView,
   colors,
   fonts,
-  mealAccent,
   radius,
-  shadow,
   space,
   styles,
   type TabKey,
   type TabSpec,
 } from '../components/ui';
-import { Mascot } from '../components/Mascot';
+import { Text, TextInput } from '../components/Typography';
 import { MealPlanScreen } from './MealPlan';
 import { GroceriesScreen } from './Groceries';
 import { ChatScreen } from './Chat';
+import heroGradient from '../../assets/hero-gradient.png';
 
 const MEMBER_TABS: readonly TabSpec[] = [
   { key: 'today', label: 'Today', icon: 'plate' },
   { key: 'mealPlan', label: 'Meal Plan', icon: 'calendar' },
   { key: 'groceries', label: 'Groceries', icon: 'basket' },
 ];
+
+const SELECTED_ACCESSIBILITY_STATE = { selected: true } as const;
+const UNSELECTED_ACCESSIBILITY_STATE = { selected: false } as const;
+const HERO_TEXT_SOFT = 'rgba(255,255,255,0.88)';
+const HERO_TEXT_SHADOW = 'rgba(0,0,0,0.72)';
 
 /**
  * The Household Member / Owner entry shell (issue 03 — Variant A). Launches
@@ -54,9 +60,18 @@ const MEMBER_TABS: readonly TabSpec[] = [
  * Members and Cooks.
  */
 export function MemberShell({ household }: { household: HouseholdSummary }) {
+  const insets = useSafeAreaInsets();
   const [tab, setTab] = useState<TabKey>('today');
   const [chatOpen, setChatOpen] = useState(false);
+  const [recipeOpen, setRecipeOpen] = useState(false);
   const { revoked } = useAccessProbe(household.id);
+  const closeChat = useCallback(() => setChatOpen(false), []);
+  const openChat = useCallback(() => setChatOpen(true), []);
+  const openMealPlan = useCallback(() => setTab('mealPlan'), []);
+  const headerStyle = useMemo(
+    () => [shell.header, { paddingTop: insets.top + 10, minHeight: insets.top + 68 }],
+    [insets.top],
+  );
 
   // A removed member exits immediately with a plain explanation (issue 03).
   if (revoked)
@@ -68,32 +83,38 @@ export function MemberShell({ household }: { household: HouseholdSummary }) {
     );
 
   if (chatOpen) {
-    return <ChatScreen household={household} backLabel="Back" onBack={() => setChatOpen(false)} />;
+    return <ChatScreen household={household} backLabel="Back" onBack={closeChat} />;
   }
 
   return (
     <TabBarMinimizeProvider>
       <View style={shell.root}>
-        <View style={shell.header}>
-          <Avatar name={household.name} size={42} />
-          <View style={shell.headerText}>
-            <Text style={shell.headerName} numberOfLines={1}>
-              {household.name}
-            </Text>
-            <Text style={shell.headerRole}>
-              {household.role === 'owner' ? 'Household owner' : 'Household member'}
-            </Text>
+        {!recipeOpen ? (
+          <View style={headerStyle}>
+            <Avatar name={household.name} size={42} />
+            <View style={shell.headerCopy}>
+              <Text style={shell.headerName} numberOfLines={1}>
+                {household.name}
+              </Text>
+              <Text style={shell.headerRole}>
+                {household.role === 'owner' ? 'Household owner' : 'Household member'}
+              </Text>
+            </View>
+            <ChatHeaderAction onPress={openChat} />
           </View>
-          <ChatHeaderAction onPress={() => setChatOpen(true)} />
-        </View>
+        ) : null}
         {tab === 'today' ? (
-          <MemberToday household={household} />
+          <MemberToday household={household} onOpenMealPlan={openMealPlan} />
         ) : tab === 'mealPlan' ? (
-          <MealPlanScreen household={household} />
+          <MealPlanScreen
+            household={household}
+            includeTopSafeArea={false}
+            onRecipeOpenChange={setRecipeOpen}
+          />
         ) : (
           <GroceriesScreen household={household} />
         )}
-        <BottomTabs tabs={MEMBER_TABS} active={tab} onSelect={setTab} />
+        {!recipeOpen ? <BottomTabs tabs={MEMBER_TABS} active={tab} onSelect={setTab} /> : null}
       </View>
     </TabBarMinimizeProvider>
   );
@@ -106,31 +127,45 @@ function greetingFor(date: Date): string {
   return 'Good evening';
 }
 
-function MemberToday({ household }: { household: HouseholdSummary }) {
+function MemberToday({
+  household,
+  onOpenMealPlan,
+}: {
+  household: HouseholdSummary;
+  onOpenMealPlan: () => void;
+}) {
   const api = useApi();
   const [meals, setMeals] = useState<PlannedMeal[] | null>(null);
   const [members, setMembers] = useState<HouseholdMember[]>([]);
   const [invites, setInvites] = useState<InviteSummary[]>([]);
+  const [error, setError] = useState<string | null>(null);
   const [changed, setChanged] = useState(0);
+  const markChanged = useCallback(() => setChanged((value) => value + 1), []);
 
   useEffect(() => {
     setMeals(null);
-    api<{ meals: PlannedMeal[] }>(`/v1/households/${household.id}/meal-plan`).then((data) =>
-      setMeals(data.meals),
-    );
+    setError(null);
+    api<{ meals: PlannedMeal[] }>(`/v1/households/${household.id}/meal-plan`)
+      .then((data) => setMeals(data.meals))
+      .catch((err: unknown) => {
+        setMeals([]);
+        setError(err instanceof Error ? err.message : "Could not load today's meals.");
+      });
     if (household.role === 'owner') {
-      api<{ members: HouseholdMember[] }>(`/v1/households/${household.id}/members`).then((data) =>
-        setMembers(data.members),
-      );
-      api<{ invites: InviteSummary[] }>(`/v1/households/${household.id}/invites`).then((data) =>
-        setInvites(data.invites),
-      );
+      api<{ members: HouseholdMember[] }>(`/v1/households/${household.id}/members`)
+        .then((data) => setMembers(data.members))
+        .catch(() => setMembers([]));
+      api<{ invites: InviteSummary[] }>(`/v1/households/${household.id}/invites`)
+        .then((data) => setInvites(data.invites))
+        .catch(() => setInvites([]));
     }
-  }, [api, household.id, changed]);
+  }, [api, household.id, household.role, changed]);
 
   const now = new Date();
   const today = now.toISOString().slice(0, 10);
   const todayMeals = (meals ?? []).filter((m) => m.date === today);
+  const nextMeal = chooseNextMeal(todayMeals, now.getHours());
+  const otherMeals = todayMeals.filter((meal) => meal.id !== nextMeal?.id);
   const dateLabel = now.toLocaleDateString(undefined, {
     weekday: 'long',
     day: 'numeric',
@@ -138,48 +173,64 @@ function MemberToday({ household }: { household: HouseholdSummary }) {
   });
 
   return (
-    <TabScrollView contentContainerStyle={today_.scroll} showsVerticalScrollIndicator={false}>
-      {/* The greeting hero: who is cooking, when, and how much is planned. */}
+    <TabScrollView
+      testID="today-screen"
+      contentContainerStyle={today_.scroll}
+      showsVerticalScrollIndicator={false}
+    >
       <FadeSlideIn>
-        <View style={today_.hero}>
-          <View style={today_.heroText}>
-            <Text style={today_.heroDate}>{dateLabel}</Text>
-            <Text style={today_.heroGreeting}>{greetingFor(now)}</Text>
-            <Text style={today_.heroBody}>
-              {meals === null
-                ? 'Checking the kitchen…'
-                : todayMeals.length > 0
-                  ? `${todayMeals.length} meals planned for today.`
-                  : 'Nothing planned yet for today.'}
-            </Text>
-          </View>
-          <View style={today_.heroMascot}>
-            <Mascot size={112} />
-          </View>
+        <View style={today_.greeting}>
+          <Text style={today_.date}>{dateLabel}</Text>
+          <Text style={today_.greetingTitle}>{greetingFor(now)}</Text>
+          <Text style={today_.greetingBody}>
+            {meals === null
+              ? 'Checking the kitchen…'
+              : todayMeals.length > 0
+                ? `${todayMeals.length} meals planned for today.`
+                : 'Nothing planned yet for today.'}
+          </Text>
         </View>
       </FadeSlideIn>
 
-      <FadeSlideIn delay={90}>
+      <FadeSlideIn delay={60}>
         <View style={today_.sectionHead}>
           <Text style={styles.eyebrow}>On the table</Text>
-          <Text style={styles.sectionTitle}>Today&apos;s meals</Text>
+          <Text style={today_.sectionTitle}>Today&apos;s meals</Text>
         </View>
       </FadeSlideIn>
 
       {meals === null ? (
         <PotLoader label="Reading the meal plan" />
-      ) : todayMeals.length > 0 ? (
-        todayMeals.map((meal, i) => (
-          <FadeSlideIn key={meal.id} delay={140 + i * 70}>
-            <MealCard meal={meal} />
+      ) : error ? (
+        <Card>
+          <Text style={styles.cardTitle}>Couldn&apos;t load today</Text>
+          <Text style={styles.subtitle}>{error}</Text>
+        </Card>
+      ) : nextMeal ? (
+        <>
+          <FadeSlideIn delay={100}>
+            <HeroMeal meal={nextMeal} dietStyle={household.dietStyle} />
           </FadeSlideIn>
-        ))
+          {otherMeals.map((meal, index) => (
+            <FadeSlideIn key={meal.id} delay={140 + index * 55}>
+              <MealCard meal={meal} />
+            </FadeSlideIn>
+          ))}
+        </>
       ) : (
-        <FadeSlideIn delay={140}>
+        <FadeSlideIn>
           <Card>
             <Text style={styles.subtitle}>
               No meals planned for today. Open Meal Plan to generate the week.
             </Text>
+            <PressableScale
+              accessibilityRole="button"
+              accessibilityLabel="Open Meal Plan"
+              style={styles.primaryButton}
+              onPress={onOpenMealPlan}
+            >
+              <Text style={styles.primaryButtonText}>Open Meal Plan</Text>
+            </PressableScale>
           </Card>
         </FadeSlideIn>
       )}
@@ -190,7 +241,7 @@ function MemberToday({ household }: { household: HouseholdSummary }) {
             household={household}
             members={members}
             invites={invites}
-            onChanged={() => setChanged((n) => n + 1)}
+            onChanged={markChanged}
           />
         </FadeSlideIn>
       ) : null}
@@ -198,23 +249,58 @@ function MemberToday({ household }: { household: HouseholdSummary }) {
   );
 }
 
+function chooseNextMeal(meals: PlannedMeal[], hour: number): PlannedMeal | null {
+  const preferred = hour < 10 ? 'breakfast' : hour < 15 ? 'lunch' : 'dinner';
+  return meals.find((meal) => meal.mealType === preferred) ?? meals[0] ?? null;
+}
+
+function HeroMeal({
+  meal,
+  dietStyle,
+}: {
+  meal: PlannedMeal;
+  dietStyle: HouseholdSummary['dietStyle'];
+}) {
+  const image = mealImage(meal.name, meal.mealType);
+  return (
+    <View accessible style={today_.mealHero} accessibilityLabel={`${meal.mealType}, ${meal.name}`}>
+      <View style={today_.mealHeroFrame}>
+        <Image source={image.source} style={today_.mealHeroImage} resizeMode="cover" />
+        <Image
+          accessible={false}
+          source={heroGradient}
+          style={today_.mealHeroShade}
+          resizeMode="stretch"
+        />
+        <View style={today_.mealHeroCopy}>
+          <Text style={today_.editorPick}>Today&apos;s pick</Text>
+          <Text style={today_.mealHeroName}>{meal.name}</Text>
+          <Text style={today_.mealHeroMeta}>
+            {meal.servings} servings · {dietStyle}
+          </Text>
+        </View>
+      </View>
+    </View>
+  );
+}
+
 /**
- * One planned meal as a card. The tinted glyph disc carries the meal type in
- * colour and in shape, so breakfast, lunch, and dinner are distinguishable
- * without relying on the label alone.
+ * One planned meal as a photo-led summary. The visible meal-type label keeps
+ * breakfast, lunch, and dinner explicit without turning the row into a new
+ * product action.
  */
 function MealCard({ meal }: { meal: PlannedMeal }) {
-  const accent = mealAccent(meal.mealType);
+  const image = mealImage(meal.name, meal.mealType);
   return (
-    <View style={today_.mealCard}>
-      <View style={[today_.mealGlyph, { backgroundColor: accent.tint }]}>
-        <Text style={today_.mealGlyphText}>{accent.glyph}</Text>
+    <View accessible style={today_.mealCard} accessibilityLabel={`${meal.mealType}, ${meal.name}`}>
+      <Image source={image.source} style={today_.mealThumb} resizeMode="cover" />
+      <View style={today_.mealCardCopy}>
+        <Text style={today_.mealMeta}>{meal.mealType}</Text>
+        <Text style={today_.mealName} numberOfLines={2}>
+          {meal.name}
+        </Text>
+        <Text style={today_.mealServings}>{meal.servings} servings</Text>
       </View>
-      <View style={today_.mealBody}>
-        <Text style={[styles.mealType, { color: accent.label }]}>{meal.mealType}</Text>
-        <Text style={today_.mealName}>{meal.name}</Text>
-      </View>
-      {meal.isSpecial ? <Chip label="Special" tint={colors.brandSoft} ink={colors.brand} /> : null}
     </View>
   );
 }
@@ -248,29 +334,28 @@ function OwnerMembership({
   // WhatsApp). The message includes a tappable cooklink:// deep link so the
   // recipient can accept in one tap; the token is also shown as a fallback for
   // manual entry when the app is not yet installed or the link cannot open.
-  async function sendViaWhatsApp(
-    invitePhone: string,
-    inviteToken: string,
-    inviteRole: 'member' | 'cook',
-  ) {
-    const normalized = invitePhone.replace(/[^\d]/g, '');
-    const deepLink = `cooklink://invite?token=${encodeURIComponent(inviteToken)}`;
-    const message = `You're invited to join ${household.name} as a ${inviteRole} on Cooklink. Tap to accept: ${deepLink} (or open Cooklink and enter token: ${inviteToken})`;
-    const url = `https://wa.me/${normalized}?text=${encodeURIComponent(message)}`;
-    try {
-      const canOpen = await Linking.canOpenURL(url);
-      if (canOpen) {
-        await Linking.openURL(url);
-        setNotice(`WhatsApp opened with the ${inviteRole} invite message.`);
-        return;
+  const sendViaWhatsApp = useCallback(
+    async (invitePhone: string, inviteToken: string, inviteRole: 'member' | 'cook') => {
+      const normalized = invitePhone.replace(/[^\d]/g, '');
+      const deepLink = `cooklink://invite?token=${encodeURIComponent(inviteToken)}`;
+      const message = `You're invited to join ${household.name} as a ${inviteRole} on Cooklink. Tap to accept: ${deepLink} (or open Cooklink and enter token: ${inviteToken})`;
+      const url = `https://wa.me/${normalized}?text=${encodeURIComponent(message)}`;
+      try {
+        const canOpen = await Linking.canOpenURL(url);
+        if (canOpen) {
+          await Linking.openURL(url);
+          setNotice(`WhatsApp opened with the ${inviteRole} invite message.`);
+          return;
+        }
+      } catch {
+        // Fall through to the manual fallback below.
       }
-    } catch {
-      // Fall through to the manual fallback below.
-    }
-    setNotice(`WhatsApp is not available. Share this link with the ${inviteRole}: ${deepLink}`);
-  }
+      setNotice(`WhatsApp is not available. Share this link with the ${inviteRole}: ${deepLink}`);
+    },
+    [household.name],
+  );
 
-  async function createInvite() {
+  const createInvite = useCallback(async () => {
     setBusy(true);
     setError(null);
     setNotice(null);
@@ -287,59 +372,71 @@ function OwnerMembership({
     } finally {
       setBusy(false);
     }
-  }
+  }, [api, household.id, onChanged, phone, role, sendViaWhatsApp]);
 
-  async function resend(inviteId: string) {
-    setBusy(true);
-    setError(null);
-    setNotice(null);
-    try {
-      const result = await api<{ token: string; role: 'member' | 'cook' }>(
-        `/v1/invites/${inviteId}/resend`,
-        { method: 'POST' },
-      );
-      // The invite's phone is masked in the list; use the raw phone the owner
-      // entered for the WhatsApp link. If the owner navigated away, fall back
-      // to displaying the token.
-      const invitePhone = phone || '';
-      await sendViaWhatsApp(invitePhone, result.token, result.role);
-      onChanged();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not resend the invite.');
-    } finally {
-      setBusy(false);
-    }
-  }
+  const resend = useCallback(
+    async (inviteId: string) => {
+      setBusy(true);
+      setError(null);
+      setNotice(null);
+      try {
+        const result = await api<{ token: string; role: 'member' | 'cook' }>(
+          `/v1/invites/${inviteId}/resend`,
+          { method: 'POST' },
+        );
+        // The invite's phone is masked in the list; use the raw phone the owner
+        // entered for the WhatsApp link. If the owner navigated away, fall back
+        // to displaying the token.
+        const invitePhone = phone || '';
+        await sendViaWhatsApp(invitePhone, result.token, result.role);
+        onChanged();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Could not resend the invite.');
+      } finally {
+        setBusy(false);
+      }
+    },
+    [api, onChanged, phone, sendViaWhatsApp],
+  );
 
-  async function revoke(inviteId: string) {
-    setBusy(true);
-    setError(null);
-    try {
-      await api<{ ok: boolean }>(`/v1/invites/${inviteId}`, { method: 'DELETE' });
-      setNotice('Invite revoked.');
-      onChanged();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not revoke the invite.');
-    } finally {
-      setBusy(false);
-    }
-  }
+  const revoke = useCallback(
+    async (inviteId: string) => {
+      setBusy(true);
+      setError(null);
+      try {
+        await api<{ ok: boolean }>(`/v1/invites/${inviteId}`, { method: 'DELETE' });
+        setNotice('Invite revoked.');
+        onChanged();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Could not revoke the invite.');
+      } finally {
+        setBusy(false);
+      }
+    },
+    [api, onChanged],
+  );
 
-  async function remove(membershipId: string) {
-    setBusy(true);
-    setError(null);
-    try {
-      await api<{ ok: boolean }>(`/v1/households/${household.id}/members/${membershipId}`, {
-        method: 'DELETE',
-      });
-      setNotice('Access removed.');
-      onChanged();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not remove access.');
-    } finally {
-      setBusy(false);
-    }
-  }
+  const remove = useCallback(
+    async (membershipId: string) => {
+      setBusy(true);
+      setError(null);
+      try {
+        await api<{ ok: boolean }>(`/v1/households/${household.id}/members/${membershipId}`, {
+          method: 'DELETE',
+        });
+        setNotice('Access removed.');
+        onChanged();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Could not remove access.');
+      } finally {
+        setBusy(false);
+      }
+    },
+    [api, household.id, onChanged],
+  );
+
+  const selectCookRole = useCallback(() => setRole('cook'), []);
+  const selectMemberRole = useCallback(() => setRole('member'), []);
 
   return (
     <View style={owner.wrap}>
@@ -354,22 +451,26 @@ function OwnerMembership({
           <PressableScale
             accessibilityRole="button"
             accessibilityLabel="Invite a cook"
-            accessibilityState={{ selected: role === 'cook' }}
-            style={[styles.segmentButton, role === 'cook' && styles.segmentActive]}
-            onPress={() => setRole('cook')}
+            accessibilityState={
+              role === 'cook' ? SELECTED_ACCESSIBILITY_STATE : UNSELECTED_ACCESSIBILITY_STATE
+            }
+            style={role === 'cook' ? SEGMENT_BUTTON_ACTIVE_STYLE : styles.segmentButton}
+            onPress={selectCookRole}
           >
-            <Text style={[styles.segmentText, role === 'cook' && styles.segmentTextActive]}>
+            <Text style={role === 'cook' ? SEGMENT_TEXT_ACTIVE_STYLE : styles.segmentText}>
               Cook
             </Text>
           </PressableScale>
           <PressableScale
             accessibilityRole="button"
             accessibilityLabel="Invite a member"
-            accessibilityState={{ selected: role === 'member' }}
-            style={[styles.segmentButton, role === 'member' && styles.segmentActive]}
-            onPress={() => setRole('member')}
+            accessibilityState={
+              role === 'member' ? SELECTED_ACCESSIBILITY_STATE : UNSELECTED_ACCESSIBILITY_STATE
+            }
+            style={role === 'member' ? SEGMENT_BUTTON_ACTIVE_STYLE : styles.segmentButton}
+            onPress={selectMemberRole}
           >
-            <Text style={[styles.segmentText, role === 'member' && styles.segmentTextActive]}>
+            <Text style={role === 'member' ? SEGMENT_TEXT_ACTIVE_STYLE : styles.segmentText}>
               Member
             </Text>
           </PressableScale>
@@ -381,7 +482,7 @@ function OwnerMembership({
         <PressableScale
           accessibilityRole="button"
           accessibilityLabel={`Create ${role} invite`}
-          style={[styles.primaryButton, busy && styles.disabled]}
+          style={busy ? DISABLED_PRIMARY_BUTTON_STYLE : styles.primaryButton}
           disabled={busy}
           onPress={createInvite}
         >
@@ -397,39 +498,14 @@ function OwnerMembership({
         <Card>
           <Text style={styles.cardTitle}>Pending invites</Text>
           {invites.map((invite, i) => (
-            <View key={invite.id}>
-              {i > 0 ? <Divider /> : null}
-              <View style={owner.row}>
-                <View style={owner.rowText}>
-                  <Chip
-                    label={invite.role}
-                    tint={invite.role === 'cook' ? colors.accentSoft : colors.brandSoft}
-                    ink={invite.role === 'cook' ? colors.accent : colors.brand}
-                  />
-                  <Text style={owner.rowLabel}>{invite.phoneMasked}</Text>
-                </View>
-                <View style={owner.rowActions}>
-                  <PressableScale
-                    accessibilityRole="button"
-                    accessibilityLabel={`Resend invite to ${invite.phoneMasked}`}
-                    style={styles.ghostButton}
-                    disabled={busy}
-                    onPress={() => resend(invite.id)}
-                  >
-                    <Text style={styles.ghostButtonText}>Resend</Text>
-                  </PressableScale>
-                  <PressableScale
-                    accessibilityRole="button"
-                    accessibilityLabel={`Revoke invite to ${invite.phoneMasked}`}
-                    style={styles.ghostButton}
-                    disabled={busy}
-                    onPress={() => revoke(invite.id)}
-                  >
-                    <Text style={[styles.ghostButtonText, { color: colors.danger }]}>Revoke</Text>
-                  </PressableScale>
-                </View>
-              </View>
-            </View>
+            <PendingInviteRow
+              key={invite.id}
+              invite={invite}
+              showDivider={i > 0}
+              busy={busy}
+              onResend={resend}
+              onRevoke={revoke}
+            />
           ))}
         </Card>
       ) : null}
@@ -437,32 +513,109 @@ function OwnerMembership({
       <Card>
         <Text style={styles.cardTitle}>Members and cooks</Text>
         {members.map((member, i) => (
-          <View key={member.id}>
-            {i > 0 ? <Divider /> : null}
-            <View style={owner.row}>
-              <View style={owner.rowText}>
-                <Chip
-                  label={member.role}
-                  tint={member.role === 'cook' ? colors.accentSoft : colors.brandSoft}
-                  ink={member.role === 'cook' ? colors.accent : colors.brand}
-                />
-                <Text style={owner.rowLabel}>{member.notificationDefault}</Text>
-              </View>
-              {member.role !== 'owner' ? (
-                <PressableScale
-                  accessibilityRole="button"
-                  accessibilityLabel={`Remove ${member.role} access`}
-                  style={styles.ghostButton}
-                  disabled={busy}
-                  onPress={() => remove(member.id)}
-                >
-                  <Text style={[styles.ghostButtonText, { color: colors.danger }]}>Remove</Text>
-                </PressableScale>
-              ) : null}
-            </View>
-          </View>
+          <MemberAccessRow
+            key={member.id}
+            member={member}
+            showDivider={i > 0}
+            busy={busy}
+            onRemove={remove}
+          />
         ))}
       </Card>
+    </View>
+  );
+}
+
+function PendingInviteRow({
+  invite,
+  showDivider,
+  busy,
+  onResend,
+  onRevoke,
+}: {
+  invite: InviteSummary;
+  showDivider: boolean;
+  busy: boolean;
+  onResend: (inviteId: string) => Promise<void>;
+  onRevoke: (inviteId: string) => Promise<void>;
+}) {
+  const resendInvite = useCallback(() => void onResend(invite.id), [invite.id, onResend]);
+  const revokeInvite = useCallback(() => void onRevoke(invite.id), [invite.id, onRevoke]);
+
+  return (
+    <View>
+      {showDivider ? <Divider /> : null}
+      <View style={owner.row}>
+        <View style={owner.rowText}>
+          <Chip
+            label={invite.role}
+            tint={invite.role === 'cook' ? colors.accentSoft : colors.brandSoft}
+            ink={invite.role === 'cook' ? colors.accent : colors.brand}
+          />
+          <Text style={owner.rowLabel}>{invite.phoneMasked}</Text>
+        </View>
+        <View style={owner.rowActions}>
+          <PressableScale
+            accessibilityRole="button"
+            accessibilityLabel={`Resend invite to ${invite.phoneMasked}`}
+            style={styles.ghostButton}
+            disabled={busy}
+            onPress={resendInvite}
+          >
+            <Text style={styles.ghostButtonText}>Resend</Text>
+          </PressableScale>
+          <PressableScale
+            accessibilityRole="button"
+            accessibilityLabel={`Revoke invite to ${invite.phoneMasked}`}
+            style={styles.ghostButton}
+            disabled={busy}
+            onPress={revokeInvite}
+          >
+            <Text style={owner.dangerAction}>Revoke</Text>
+          </PressableScale>
+        </View>
+      </View>
+    </View>
+  );
+}
+
+function MemberAccessRow({
+  member,
+  showDivider,
+  busy,
+  onRemove,
+}: {
+  member: HouseholdMember;
+  showDivider: boolean;
+  busy: boolean;
+  onRemove: (membershipId: string) => Promise<void>;
+}) {
+  const removeAccess = useCallback(() => void onRemove(member.id), [member.id, onRemove]);
+
+  return (
+    <View>
+      {showDivider ? <Divider /> : null}
+      <View style={owner.row}>
+        <View style={owner.rowText}>
+          <Chip
+            label={member.role}
+            tint={member.role === 'cook' ? colors.accentSoft : colors.brandSoft}
+            ink={member.role === 'cook' ? colors.accent : colors.brand}
+          />
+          <Text style={owner.rowLabel}>{member.notificationDefault}</Text>
+        </View>
+        {member.role !== 'owner' ? (
+          <PressableScale
+            accessibilityRole="button"
+            accessibilityLabel={`Remove ${member.role} access`}
+            style={styles.ghostButton}
+            disabled={busy}
+            onPress={removeAccess}
+          >
+            <Text style={owner.dangerAction}>Remove</Text>
+          </PressableScale>
+        ) : null}
+      </View>
     </View>
   );
 }
@@ -492,76 +645,138 @@ function InvitePhoneInput({
 const shell = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.surface },
   header: {
+    paddingHorizontal: 20,
+    paddingBottom: space.md,
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.md,
-    paddingHorizontal: space.xl,
-    paddingTop: 58,
-    paddingBottom: space.md,
     backgroundColor: colors.surface,
   },
-  headerText: { flex: 1 },
-  headerName: { fontFamily: fonts.display, fontSize: 20, fontWeight: '700', color: colors.ink },
-  headerRole: { fontSize: 12, color: colors.inkSoft, marginTop: 1 },
+  headerCopy: { flex: 1, gap: 2 },
+  headerName: {
+    fontFamily: fonts.display,
+    fontSize: 20,
+    lineHeight: 24,
+    fontWeight: '600',
+    color: colors.ink,
+  },
+  headerRole: { fontSize: 11, lineHeight: 15, color: colors.inkSoft },
 });
 
 const today_ = StyleSheet.create({
   scroll: {
-    paddingHorizontal: space.xl,
-    paddingTop: space.sm,
+    paddingHorizontal: 20,
+    paddingTop: space.md,
     paddingBottom: space.xxl,
-    gap: space.md,
+    gap: 18,
   },
-
-  hero: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    borderRadius: radius.xl,
-    backgroundColor: colors.brandSoft,
-    paddingLeft: space.xl,
-    paddingTop: space.lg,
-    paddingRight: space.md,
-    ...shadow.soft,
+  greeting: { gap: 3, paddingBottom: space.sm },
+  date: {
+    fontSize: 10,
+    lineHeight: 13,
+    color: colors.inkSoft,
+    textTransform: 'uppercase',
+    letterSpacing: 1.5,
+    fontWeight: '700',
   },
-  heroText: { flex: 1, paddingBottom: space.xl, paddingRight: space.sm, gap: 2 },
-  heroDate: {
+  greetingTitle: {
+    fontFamily: fonts.display,
+    fontSize: 30,
+    lineHeight: 36,
+    fontWeight: '600',
+    color: colors.ink,
+  },
+  greetingBody: { fontSize: 14, lineHeight: 20, color: colors.inkSoft },
+  sectionTitle: {
+    fontFamily: fonts.display,
+    fontSize: 23,
+    lineHeight: 28,
+    fontWeight: '600',
+    color: colors.ink,
+  },
+  mealHero: { position: 'relative' },
+  mealHeroFrame: {
+    height: 236,
+    overflow: 'hidden',
+    borderRadius: radius.lg,
+    backgroundColor: colors.surfaceDeep,
+  },
+  mealHeroImage: { width: '100%', height: '100%' },
+  mealHeroShade: {
+    position: 'absolute',
+    right: 0,
+    bottom: 0,
+    left: 0,
+    width: '100%',
+    height: '76%',
+  },
+  mealHeroCopy: { position: 'absolute', right: 18, bottom: 16, left: 18, gap: 6 },
+  editorPick: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 5,
+    overflow: 'hidden',
+    backgroundColor: colors.coral,
+    color: colors.card,
     fontSize: 11,
-    fontWeight: '800',
-    color: colors.brand,
+    lineHeight: 13,
+    fontWeight: '900',
     textTransform: 'uppercase',
     letterSpacing: 1.1,
   },
-  heroGreeting: {
+  mealHeroName: {
     fontFamily: fonts.display,
     fontSize: 25,
     lineHeight: 30,
-    fontWeight: '700',
-    color: colors.ink,
+    fontWeight: '600',
+    color: colors.card,
+    letterSpacing: -0.4,
+    textShadowColor: HERO_TEXT_SHADOW,
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 6,
   },
-  heroBody: { fontSize: 14, lineHeight: 20, color: colors.inkSoft, marginTop: 2 },
-  heroMascot: { marginBottom: space.xs },
-
-  sectionHead: { gap: 3, marginTop: space.sm },
-
+  mealHeroMeta: {
+    fontSize: 12,
+    color: HERO_TEXT_SOFT,
+    textTransform: 'capitalize',
+    textShadowColor: HERO_TEXT_SHADOW,
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
+  },
   mealCard: {
+    minHeight: 112,
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.lg,
-    borderRadius: radius.lg,
-    backgroundColor: colors.card,
-    padding: space.lg,
-    ...shadow.soft,
+    paddingVertical: space.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
   },
-  mealGlyph: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    alignItems: 'center',
-    justifyContent: 'center',
+  mealThumb: {
+    width: 112,
+    height: 96,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceDeep,
   },
-  mealGlyphText: { fontSize: 25 },
-  mealBody: { flex: 1, gap: 3 },
-  mealName: { fontFamily: fonts.display, fontSize: 19, lineHeight: 24, color: colors.ink },
+  mealCardCopy: { flex: 1, gap: 4 },
+  mealName: {
+    fontFamily: fonts.display,
+    fontSize: 19,
+    lineHeight: 24,
+    fontWeight: '600',
+    color: colors.ink,
+  },
+  mealMeta: {
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: '800',
+    letterSpacing: 1.1,
+    color: colors.brand,
+    textTransform: 'uppercase',
+  },
+  mealServings: { fontSize: 12, lineHeight: 16, color: colors.inkSoft },
+  sectionHead: { gap: 3, marginTop: space.sm },
 });
 
 const owner = StyleSheet.create({
@@ -576,4 +791,9 @@ const owner = StyleSheet.create({
   rowText: { flexDirection: 'row', alignItems: 'center', gap: space.sm, flex: 1 },
   rowLabel: { fontSize: 14, color: colors.inkSoft, flexShrink: 1 },
   rowActions: { flexDirection: 'row', gap: space.sm },
+  dangerAction: { color: colors.danger, fontSize: 15, fontWeight: '700' },
 });
+
+const SEGMENT_BUTTON_ACTIVE_STYLE = [styles.segmentButton, styles.segmentActive];
+const SEGMENT_TEXT_ACTIVE_STYLE = [styles.segmentText, styles.segmentTextActive];
+const DISABLED_PRIMARY_BUTTON_STYLE = [styles.primaryButton, styles.disabled];

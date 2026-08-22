@@ -1,5 +1,6 @@
 import {
   createContext,
+  memo,
   useCallback,
   useContext,
   useEffect,
@@ -13,12 +14,16 @@ import {
   Platform,
   Pressable,
   StyleSheet,
-  Text,
   View,
   useWindowDimensions,
   type PressableProps,
+  type StyleProp,
   type ViewStyle,
 } from 'react-native';
+import { BlurView } from 'expo-blur';
+import { GlassView, isLiquidGlassAvailable } from 'expo-glass-effect';
+import * as Haptics from 'expo-haptics';
+import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Reanimated, {
   Extrapolation,
@@ -32,6 +37,12 @@ import Reanimated, {
   type SharedValue,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Text } from './Typography';
+import { fonts } from '../theme/typography';
+
+export { fonts } from '../theme/typography';
+
+const AnimatedGlassView = Reanimated.createAnimatedComponent(GlassView);
 
 /**
  * Cooklink design system — "Warm Kitchen".
@@ -58,29 +69,43 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 // ---------------------------------------------------------------------------
 
 export const colors = {
-  // Surfaces, warmest to coolest.
-  surface: '#FBF5EC',
-  surfaceDeep: '#F3EADB',
+  // Sleek's Warm Cookbook is printed on a barely warm paper canvas. Neutral
+  // controls sit one tone deeper; food photography supplies nearly all colour.
+  surface: '#FDFCF8',
+  surfaceDeep: '#F3EFE6',
   card: '#FFFFFF',
-  field: '#EFE7D9',
-  border: '#E7DDCB',
+  field: '#F3EFE6',
+  border: '#E7E2DA',
 
   // Text. `ink` and `inkSoft` both clear 4.5:1 on surface and card.
-  ink: '#212A26',
-  inkSoft: '#63605A',
+  ink: '#1D1C19',
+  inkSoft: '#6F6B65',
 
-  // Deep curry-leaf green: every primary action, and white-on-accent text.
-  accent: '#0F5D45',
-  accentSoft: '#D8E8E0',
+  // The sampled coral is retained for large/decorative accents. The semantic
+  // action shade is slightly darker so small text and white button labels keep
+  // their contrast on a real device.
+  coral: '#C9624A',
+  accent: '#B64E39',
+  accentSoft: '#FDE5DB',
+  olive: '#5F6B48',
+  oliveSoft: '#E7E9DF',
 
   // Cinnamon: eyebrows, day headings, meal-type labels.
-  brand: '#8A4A22',
-  brandSoft: '#F3E3D3',
+  brand: '#74685C',
+  brandSoft: '#F3EFE6',
 
   // Warning red, and the two decorative spices (never used behind body text).
   danger: '#A32E1E',
-  turmeric: '#E9A63B',
+  dangerSoft: '#FBEAE6',
+  turmeric: '#C89A45',
   paprika: '#D9612C',
+
+  // Translucent structural surfaces.
+  scrim: 'rgba(28,20,12,0.45)',
+  glassMaterial: 'rgba(253, 252, 248, 0.42)',
+  glassFallback: 'rgba(255, 255, 255, 0.94)',
+  glassBorder: 'rgba(231, 226, 218, 0.88)',
+  glassHighlight: 'rgba(201, 98, 74, 0.14)',
 };
 
 /**
@@ -104,35 +129,26 @@ export function mealAccent(mealType: string) {
 // Type, space, radius, elevation, motion
 // ---------------------------------------------------------------------------
 
-/**
- * The display face is the platform serif — Georgia on iOS, Noto Serif on
- * Android. Both ship with the OS, so the warm editorial voice costs no font
- * files and no bundle weight.
- */
-export const fonts = {
-  display: Platform.select({ ios: 'Georgia', android: 'serif', default: 'serif' }),
-};
-
 export const space = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 };
 
-export const radius = { sm: 10, md: 16, lg: 22, xl: 28, pill: 999 };
+export const radius = { sm: 12, md: 16, lg: 22, xl: 30, pill: 999 };
 
 export const shadow = {
   /** Resting cards. */
   soft: {
-    shadowColor: '#7A5A32',
-    shadowOpacity: 0.1,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 3,
+    shadowColor: '#000000',
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
   },
   /** Hero cards, sheets, and the tab bar. */
   lift: {
-    shadowColor: '#6B4E2C',
-    shadowOpacity: 0.16,
-    shadowRadius: 28,
-    shadowOffset: { width: 0, height: 14 },
-    elevation: 10,
+    shadowColor: '#000000',
+    shadowOpacity: 0.12,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 8,
   },
 };
 
@@ -170,23 +186,40 @@ export function PressableScale({
   style,
   to = 0.96,
   ...rest
-}: PressableProps & { children: ReactNode; style?: ViewStyle | ViewStyle[]; to?: number }) {
+}: Omit<PressableProps, 'style'> & {
+  children: ReactNode;
+  style?: StyleProp<ViewStyle>;
+  to?: number;
+}) {
   const scale = useRef(new Animated.Value(1)).current;
-  const spring = (value: number) =>
-    Animated.spring(scale, { toValue: value, ...motion.press }).start();
+  const restOnPressIn = rest.onPressIn;
+  const restOnPressOut = rest.onPressOut;
+  const spring = useCallback(
+    (value: number) => Animated.spring(scale, { toValue: value, ...motion.press }).start(),
+    [scale],
+  );
+  const scaleStyle = useMemo(() => ({ transform: [{ scale }] }), [scale]);
+  const handlePressIn = useCallback<NonNullable<PressableProps['onPressIn']>>(
+    (event) => {
+      spring(to);
+      restOnPressIn?.(event);
+    },
+    [restOnPressIn, spring, to],
+  );
+  const handlePressOut = useCallback<NonNullable<PressableProps['onPressOut']>>(
+    (event) => {
+      spring(1);
+      restOnPressOut?.(event);
+    },
+    [restOnPressOut, spring],
+  );
 
   return (
     <AnimatedPressable
       {...rest}
-      style={[style, { transform: [{ scale }] }]}
-      onPressIn={(e) => {
-        spring(to);
-        rest.onPressIn?.(e);
-      }}
-      onPressOut={(e) => {
-        spring(1);
-        rest.onPressOut?.(e);
-      }}
+      style={StyleSheet.compose(style, scaleStyle)}
+      onPressIn={handlePressIn}
+      onPressOut={handlePressOut}
     >
       {children}
     </AnimatedPressable>
@@ -210,6 +243,15 @@ export function FadeSlideIn({
   style?: ViewStyle | ViewStyle[];
 }) {
   const progress = useRef(new Animated.Value(0)).current;
+  const animatedStyle = useMemo(
+    () => ({
+      opacity: progress,
+      transform: [
+        { translateY: progress.interpolate({ inputRange: [0, 1], outputRange: [from, 0] }) },
+      ],
+    }),
+    [from, progress],
+  );
 
   useEffect(() => {
     Animated.timing(progress, {
@@ -221,27 +263,14 @@ export function FadeSlideIn({
     }).start();
   }, [delay, progress]);
 
-  return (
-    <Animated.View
-      style={[
-        style,
-        {
-          opacity: progress,
-          transform: [
-            { translateY: progress.interpolate({ inputRange: [0, 1], outputRange: [from, 0] }) },
-          ],
-        },
-      ]}
-    >
-      {children}
-    </Animated.View>
-  );
+  return <Animated.View style={StyleSheet.compose(style, animatedStyle)}>{children}</Animated.View>;
 }
 
 // ---------------------------------------------------------------------------
 // Core styles
 // ---------------------------------------------------------------------------
 
+/* eslint-disable react-native/no-unused-styles -- exported design-system styles are consumed by other modules. */
 export const styles = StyleSheet.create({
   screen: {
     flexGrow: 1,
@@ -310,27 +339,27 @@ export const styles = StyleSheet.create({
   primaryButton: {
     padding: 17,
     paddingHorizontal: space.xl,
-    borderRadius: radius.pill,
+    borderRadius: radius.sm,
     backgroundColor: colors.accent,
     alignItems: 'center',
     justifyContent: 'center',
     ...shadow.soft,
   },
-  primaryButtonText: { color: '#FFFFFF', fontSize: 17, fontWeight: '700', letterSpacing: 0.2 },
+  primaryButtonText: { color: colors.card, fontSize: 17, fontWeight: '700', letterSpacing: 0.2 },
   secondaryButton: {
     padding: 15,
     paddingHorizontal: space.xl,
-    borderRadius: radius.pill,
+    borderRadius: radius.sm,
     backgroundColor: colors.ink,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  secondaryButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
+  secondaryButtonText: { color: colors.card, fontSize: 16, fontWeight: '700' },
   /** Outline rather than filled, so it never competes with the primary pill. */
   ghostButton: {
     padding: 14,
     paddingHorizontal: 18,
-    borderRadius: radius.pill,
+    borderRadius: radius.sm,
     borderWidth: 1.5,
     borderColor: colors.border,
     backgroundColor: colors.card,
@@ -383,6 +412,7 @@ export const styles = StyleSheet.create({
   },
   mealName: { flex: 1, fontFamily: fonts.display, fontSize: 18, color: colors.ink },
 });
+/* eslint-enable react-native/no-unused-styles */
 
 // ---------------------------------------------------------------------------
 // Small building blocks
@@ -398,9 +428,11 @@ export function Chip({
   tint?: string;
   ink?: string;
 }) {
+  const chipStyle = useMemo(() => ({ backgroundColor: tint }), [tint]);
+  const textStyle = useMemo(() => ({ color: ink }), [ink]);
   return (
-    <View style={[chipStyles.chip, { backgroundColor: tint }]}>
-      <Text style={[chipStyles.text, { color: ink }]}>{label}</Text>
+    <View style={StyleSheet.compose(chipStyles.chip, chipStyle)}>
+      <Text style={StyleSheet.compose(chipStyles.text, textStyle)}>{label}</Text>
     </View>
   );
 }
@@ -413,9 +445,14 @@ const chipStyles = StyleSheet.create({
 /** A circular monogram standing in for a household or person. */
 export function Avatar({ name, size = 40 }: { name: string; size?: number }) {
   const initial = name.trim().charAt(0).toUpperCase() || '·';
+  const circleStyle = useMemo(
+    () => ({ width: size, height: size, borderRadius: size / 2 }),
+    [size],
+  );
+  const textStyle = useMemo(() => ({ fontSize: size * 0.42 }), [size]);
   return (
-    <View style={[avatarStyles.circle, { width: size, height: size, borderRadius: size / 2 }]}>
-      <Text style={[avatarStyles.text, { fontSize: size * 0.42 }]}>{initial}</Text>
+    <View style={StyleSheet.compose(avatarStyles.circle, circleStyle)}>
+      <Text style={StyleSheet.compose(avatarStyles.text, textStyle)}>{initial}</Text>
     </View>
   );
 }
@@ -426,7 +463,7 @@ const avatarStyles = StyleSheet.create({
 });
 
 export function Divider() {
-  return <View style={{ height: 1, backgroundColor: colors.border }} />;
+  return <View style={buildingBlockStyles.divider} />;
 }
 
 /** A labelled form row. The label is a real caption, not placeholder text, so
@@ -441,7 +478,7 @@ export function Field({
   children: ReactNode;
 }) {
   return (
-    <View style={{ gap: space.sm }}>
+    <View style={buildingBlockStyles.field}>
       <Text style={fieldStyles.label}>{label}</Text>
       {children}
       {hint ? <Text style={fieldStyles.hint}>{hint}</Text> : null}
@@ -452,6 +489,12 @@ export function Field({
 const fieldStyles = StyleSheet.create({
   label: { fontSize: 13, fontWeight: '800', color: colors.ink, letterSpacing: 0.2 },
   hint: { fontSize: 13, color: colors.inkSoft, lineHeight: 18 },
+});
+
+const buildingBlockStyles = StyleSheet.create({
+  divider: { height: 1, backgroundColor: colors.border },
+  field: { gap: space.sm },
+  message: { gap: space.md },
 });
 
 /** An inline error, boxed so it reads as a distinct state rather than red body text. */
@@ -466,7 +509,7 @@ export function ErrorNote({ children }: { children: ReactNode }) {
 const errorStyles = StyleSheet.create({
   box: {
     borderRadius: radius.md,
-    backgroundColor: '#FBEAE6',
+    backgroundColor: colors.dangerSoft,
     borderLeftWidth: 3,
     borderLeftColor: colors.danger,
     paddingHorizontal: space.lg,
@@ -476,7 +519,7 @@ const errorStyles = StyleSheet.create({
 });
 
 export function Card({ children, style }: { children: ReactNode; style?: object }) {
-  return <View style={[styles.card, style]}>{children}</View>;
+  return <View style={StyleSheet.compose(styles.card, style)}>{children}</View>;
 }
 
 /**
@@ -500,9 +543,13 @@ export function MiniButton({
 }) {
   return (
     <PressableScale
+      testID="household-chat-button"
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel ?? label}
-      style={[primary ? miniStyles.primary : miniStyles.base, disabled && styles.disabled]}
+      style={StyleSheet.compose(
+        primary ? miniStyles.primary : miniStyles.base,
+        disabled ? styles.disabled : undefined,
+      )}
       disabled={disabled}
       onPress={onPress}
     >
@@ -529,7 +576,7 @@ const miniStyles = StyleSheet.create({
     minHeight: 34,
     justifyContent: 'center',
   },
-  primaryText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
+  primaryText: { color: colors.card, fontSize: 13, fontWeight: '700' },
 });
 
 /**
@@ -579,7 +626,7 @@ const sheetStyles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(28,20,12,0.45)',
+    backgroundColor: colors.scrim,
   },
   holder: { width: '100%' },
   sheet: {
@@ -622,14 +669,16 @@ export function MealRow({
   trailing?: ReactNode;
   style?: ViewStyle | ViewStyle[];
 }) {
-  const accent = mealAccent(meal.mealType);
+  const accent = useMemo(() => mealAccent(meal.mealType), [meal.mealType]);
+  const glyphStyle = useMemo(() => ({ backgroundColor: accent.tint }), [accent.tint]);
+  const typeStyle = useMemo(() => ({ color: accent.label }), [accent.label]);
   return (
-    <View style={[mealRowStyles.row, style]}>
-      <View style={[mealRowStyles.glyph, { backgroundColor: accent.tint }]}>
+    <View style={StyleSheet.compose(mealRowStyles.row, style)}>
+      <View style={StyleSheet.compose(mealRowStyles.glyph, glyphStyle)}>
         <Text style={mealRowStyles.glyphText}>{accent.glyph}</Text>
       </View>
       <View style={mealRowStyles.body}>
-        <Text style={[styles.mealType, { color: accent.label }]}>{meal.mealType}</Text>
+        <Text style={StyleSheet.compose(styles.mealType, typeStyle)}>{meal.mealType}</Text>
         <Text style={mealRowStyles.name}>{meal.name}</Text>
         {meta ? <Text style={mealRowStyles.meta}>{meta}</Text> : null}
       </View>
@@ -713,27 +762,15 @@ export function useSteam(
  */
 export function PotLoader({ label }: { label?: string }) {
   const puffs = useSteam(3);
+  const puffEntries = useRef(
+    puffs.map((puff, index) => ({ key: `steam-puff-${index}`, puff })),
+  ).current;
 
   return (
     <View style={loaderStyles.wrap}>
       <View style={loaderStyles.steamRow}>
-        {puffs.map((puff, i) => (
-          <Animated.View
-            key={i}
-            style={[
-              loaderStyles.puff,
-              {
-                opacity: puff.interpolate({
-                  inputRange: [0, 0.2, 0.8, 1],
-                  outputRange: [0, 0.9, 0.5, 0],
-                }),
-                transform: [
-                  { translateY: puff.interpolate({ inputRange: [0, 1], outputRange: [6, -18] }) },
-                  { scale: puff.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1.3] }) },
-                ],
-              },
-            ]}
-          />
+        {puffEntries.map(({ key, puff }) => (
+          <SteamPuff key={key} puff={puff} />
         ))}
       </View>
       <View style={loaderStyles.pot}>
@@ -742,6 +779,24 @@ export function PotLoader({ label }: { label?: string }) {
       {label ? <Text style={loaderStyles.label}>{label}</Text> : null}
     </View>
   );
+}
+
+function SteamPuff({ puff }: { puff: Animated.Value }) {
+  const animatedStyle = useMemo(
+    () => ({
+      opacity: puff.interpolate({
+        inputRange: [0, 0.2, 0.8, 1],
+        outputRange: [0, 0.9, 0.5, 0],
+      }),
+      transform: [
+        { translateY: puff.interpolate({ inputRange: [0, 1], outputRange: [6, -18] }) },
+        { scale: puff.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1.3] }) },
+      ],
+    }),
+    [puff],
+  );
+
+  return <Animated.View style={StyleSheet.compose(loaderStyles.puff, animatedStyle)} />;
 }
 
 const loaderStyles = StyleSheet.create({
@@ -772,7 +827,7 @@ export function Message({ title, body }: { title: string; body: string }) {
   return (
     <View style={styles.centerScreen}>
       <FadeSlideIn>
-        <View style={{ gap: space.md }}>
+        <View style={buildingBlockStyles.message}>
           <Text style={styles.title}>{title}</Text>
           <Text style={styles.subtitle}>{body}</Text>
         </View>
@@ -785,8 +840,10 @@ export function Message({ title, body }: { title: string; body: string }) {
 // Tab bar
 // ---------------------------------------------------------------------------
 
-export type TabKey = 'today' | 'mealPlan' | 'groceries' | 'chat';
-export type IconName = 'plate' | 'calendar' | 'basket' | 'chat';
+export type TabKey =
+  'today' | 'mealPlan' | 'groceries' | 'chat' | 'archive' | 'cookbook' | 'household';
+export type IconName =
+  'plate' | 'calendar' | 'basket' | 'chat' | 'home' | 'book' | 'search' | 'bookmark' | 'user';
 
 export interface TabSpec {
   key: TabKey;
@@ -798,119 +855,75 @@ export interface TabSpec {
   render?: () => ReactNode;
 }
 
-/**
- * Tab icons drawn from plain Views rather than an icon font. Four shapes is
- * less code than a font dependency, and they inherit the palette exactly.
- */
-export function TabIcon({ name, color }: { name: IconName; color: string }) {
-  if (name === 'plate') {
-    // A bowl with a rim, rather than a ring — it reads as food at 22pt where a
-    // circle reads as a generic target.
-    return (
-      <View style={iconStyles.plateWrap}>
-        <View style={[iconStyles.plateRim, { backgroundColor: color }]} />
-        <View style={[iconStyles.plate, { borderColor: color }]} />
-      </View>
-    );
-  }
-  if (name === 'calendar') {
-    return (
-      <View style={[iconStyles.calendar, { borderColor: color }]}>
-        <View style={[iconStyles.calendarBar, { backgroundColor: color }]} />
-        <View style={iconStyles.calendarDots}>
-          <View style={[iconStyles.dot, { backgroundColor: color }]} />
-          <View style={[iconStyles.dot, { backgroundColor: color }]} />
-        </View>
-      </View>
-    );
-  }
-  if (name === 'basket') {
-    return (
-      <View style={iconStyles.basketWrap}>
-        <View style={[iconStyles.basketHandle, { borderColor: color }]} />
-        <View style={[iconStyles.basket, { borderColor: color }]}>
-          <View style={[iconStyles.basketRib, { backgroundColor: color }]} />
-        </View>
-      </View>
-    );
-  }
-  return (
-    <View style={iconStyles.chatWrap}>
-      <View style={[iconStyles.chatBubble, { backgroundColor: color }]} />
-      <View style={[iconStyles.chatTail, { borderTopColor: color }]} />
-    </View>
-  );
-}
+type PlatformSymbol = SymbolViewProps['name'];
 
-const iconStyles = StyleSheet.create({
-  plateWrap: { width: 22, height: 22, alignItems: 'center', justifyContent: 'center', gap: 2 },
-  plateRim: { width: 21, height: 2, borderRadius: 1 },
+const tabSymbols: Record<IconName, { regular: PlatformSymbol; selected: PlatformSymbol }> = {
+  home: {
+    regular: { ios: 'house', android: 'home' },
+    selected: { ios: 'house.fill', android: 'home_filled' },
+  },
+  book: {
+    regular: { ios: 'book.closed', android: 'menu_book' },
+    selected: { ios: 'book.closed.fill', android: 'menu_book' },
+  },
+  search: {
+    regular: { ios: 'magnifyingglass', android: 'search' },
+    selected: { ios: 'magnifyingglass', android: 'search' },
+  },
+  bookmark: {
+    regular: { ios: 'bookmark', android: 'bookmark_border' },
+    selected: { ios: 'bookmark.fill', android: 'bookmark' },
+  },
+  user: {
+    regular: { ios: 'person', android: 'person_outline' },
+    selected: { ios: 'person.fill', android: 'person' },
+  },
   plate: {
-    width: 18,
-    height: 10,
-    borderWidth: 2,
-    borderTopWidth: 0,
-    borderBottomLeftRadius: 10,
-    borderBottomRightRadius: 10,
+    regular: { ios: 'fork.knife', android: 'restaurant' },
+    selected: { ios: 'fork.knife', android: 'restaurant' },
   },
   calendar: {
-    width: 22,
-    height: 21,
-    borderRadius: 6,
-    borderWidth: 2,
-    paddingTop: 3,
-    alignItems: 'center',
-    gap: 3,
-  },
-  calendarBar: { width: 10, height: 2, borderRadius: 1 },
-  calendarDots: { flexDirection: 'row', gap: 3 },
-  dot: { width: 3, height: 3, borderRadius: 1.5 },
-  basketWrap: {
-    width: 22,
-    height: 22,
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    paddingBottom: 1,
-  },
-  basketHandle: {
-    width: 11,
-    height: 7,
-    borderWidth: 2,
-    borderBottomWidth: 0,
-    borderTopLeftRadius: 6,
-    borderTopRightRadius: 6,
-    marginBottom: 1,
+    regular: { ios: 'calendar', android: 'calendar_today' },
+    selected: { ios: 'calendar', android: 'calendar_month' },
   },
   basket: {
-    width: 21,
-    height: 12,
-    borderWidth: 2,
-    borderBottomLeftRadius: 8,
-    borderBottomRightRadius: 8,
-    borderTopLeftRadius: 3,
-    borderTopRightRadius: 3,
-    alignItems: 'center',
-    paddingTop: 2,
+    regular: { ios: 'basket', android: 'shopping_basket' },
+    selected: { ios: 'basket.fill', android: 'shopping_basket' },
   },
-  basketRib: { width: 2, height: 5, borderRadius: 1 },
-  chatWrap: { width: 22, height: 22, alignItems: 'flex-start', justifyContent: 'center' },
-  chatBubble: { width: 21, height: 16, borderRadius: 6 },
-  chatTail: {
-    width: 0,
-    height: 0,
-    marginLeft: 4,
-    borderTopWidth: 6,
-    borderRightWidth: 7,
-    borderRightColor: 'transparent',
+  chat: {
+    regular: { ios: 'bubble.left', android: 'chat_bubble_outline' },
+    selected: { ios: 'bubble.left.fill', android: 'chat_bubble' },
   },
-});
+};
+
+/** Native SF Symbols on Apple platforms with matching Material Symbols elsewhere. */
+export function TabIcon({
+  name,
+  color,
+  selected = false,
+}: {
+  name: IconName;
+  color: string;
+  selected?: boolean;
+}) {
+  return (
+    <SymbolView
+      name={tabSymbols[name][selected ? 'selected' : 'regular']}
+      size={ICON_SIZE}
+      weight={selected ? 'semibold' : 'regular'}
+      tintColor={color}
+      resizeMode="scaleAspectFit"
+      style={tabStyles.symbol}
+    />
+  );
+}
 
 /**
  * Bar geometry. Every animated dimension is declared here rather than derived
  * from layout, so the shrink runs entirely on the UI thread — a layout callback
  * would always lag a frame behind the gesture.
  */
-const BAR_EXPANDED = 60;
+const BAR_EXPANDED = 58;
 const BAR_MINIMIZED = 44;
 /** Extra horizontal inset applied to the pill per side when minimized. */
 const MINIMIZED_INSET = 34;
@@ -919,12 +932,14 @@ const BAR_MARGIN = 12;
 /** Inner inset between the capsule wall and the tab items. */
 const ROW_PAD_H = 4;
 const ICON_SIZE = 22;
-const ITEM_GAP = 2;
+const ITEM_GAP = 1;
 /** Label height plus its gap, folded together so it vanishes as one block. */
-const LABEL_BLOCK = 14 + ITEM_GAP;
+const LABEL_BLOCK = 12 + ITEM_GAP;
 const ITEM_PAD_V = 7;
 const PILL_EXPANDED = ICON_SIZE + LABEL_BLOCK + ITEM_PAD_V * 2;
 const PILL_MINIMIZED = ICON_SIZE + ITEM_PAD_V * 2;
+/** How far the bottom progressive blur rises above the floating capsule. */
+const BLUR_BLEED = 44;
 
 /**
  * Spring, not timing, for the shrink: scroll direction flips mid-animation all
@@ -975,34 +990,13 @@ function setMinimized(state: MinimizeState, next: 0 | 1) {
   }
 }
 
-/**
- * How much bottom room a screen must leave so its last row clears the floating
- * bar. Read from the safe-area inset, so it is correct on a notched iPhone and
- * on an Android device with gesture navigation alike.
- */
-export function useTabBarClearance(): number {
-  const insets = useSafeAreaInsets();
-  return Math.max(insets.bottom - 16, 12) + BAR_EXPANDED + space.lg;
-}
-
-/**
- * A ScrollView that shrinks the shell's tab bar as you scroll down and restores
- * it on the way back up, and reserves room for the floating bar. Screens inside
- * a tab shell use this in place of ScrollView; the scroll position is read on
- * the UI thread, so the bar keeps up with a fast flick.
- */
-export function TabScrollView({
-  contentContainerStyle,
-  ...rest
-}: React.ComponentProps<typeof Reanimated.ScrollView>) {
+/** Revolut-style direction-aware collapse, adapted from expo-glass-tabs (MIT). */
+function useMinimizeOnScroll() {
   const state = useMinimizeState();
   const previousY = useSharedValue(0);
-  const clearance = useTabBarClearance();
 
-  const onScroll = useAnimatedScrollHandler({
+  return useAnimatedScrollHandler({
     onScroll: (event) => {
-      // Clamp to the scrollable range so rubber-band overscroll cannot flip the
-      // direction for a frame and flicker the bar.
       const maxY = Math.max(event.contentSize.height - event.layoutMeasurement.height, 0);
       const y = Math.min(Math.max(event.contentOffset.y, 0), maxY);
       const dy = y - previousY.value;
@@ -1013,16 +1007,82 @@ export function TabScrollView({
       else if (dy < -3) setMinimized(state, 0);
     },
   });
+}
+
+/**
+ * How much bottom room a screen must leave so its last row clears the floating
+ * bar. Read from the safe-area inset, so it is correct on a notched iPhone and
+ * on an Android device with gesture navigation alike.
+ */
+export function useTabBarClearance(): number {
+  const insets = useSafeAreaInsets();
+  return Math.max(insets.bottom - 14, 10) + BAR_EXPANDED + space.lg;
+}
+
+/**
+ * A ScrollView that reserves room for the persistent labelled tab bar. The
+ * redesign deliberately keeps primary navigation stable while content moves;
+ * people never have to reverse-scroll to recover a destination.
+ */
+export function TabScrollView({
+  contentContainerStyle,
+  ...rest
+}: React.ComponentProps<typeof Reanimated.ScrollView>) {
+  const clearance = useTabBarClearance();
+  const onScroll = useMinimizeOnScroll();
+  const clearanceStyle = useMemo(() => ({ paddingBottom: clearance }), [clearance]);
+  const contentStyle = useMemo(
+    () => [contentContainerStyle, clearanceStyle],
+    [clearanceStyle, contentContainerStyle],
+  );
 
   return (
     <Reanimated.ScrollView
       {...rest}
       onScroll={onScroll}
       scrollEventThrottle={16}
-      contentContainerStyle={[contentContainerStyle, { paddingBottom: clearance }]}
+      contentContainerStyle={contentStyle}
     />
   );
 }
+
+/**
+ * A soft stack of native blurs hides the hard edge that a single BlurView
+ * creates. The light tint keeps Cooklink's warm paper palette intact.
+ */
+const blurLayerHeights = [
+  '100%',
+  '88%',
+  '76%',
+  '64%',
+  '54%',
+  '44%',
+  '36%',
+  '28%',
+  '22%',
+  '16%',
+] as const;
+const blurLayers = blurLayerHeights.map((height) => ({
+  height,
+  style: { height, bottom: 0 } satisfies ViewStyle,
+}));
+
+const BottomProgressiveBlur = memo(function BottomProgressiveBlur({ height }: { height: number }) {
+  const blurStyle = useMemo(() => ({ height }), [height]);
+  return (
+    <View pointerEvents="none" style={StyleSheet.compose(tabStyles.blur, blurStyle)}>
+      {blurLayers.map((layer) => (
+        <BlurView
+          key={layer.height}
+          tint="light"
+          intensity={3}
+          style={StyleSheet.compose(tabStyles.blurLayer, layer.style)}
+        />
+      ))}
+      <View style={tabStyles.blurWash} />
+    </View>
+  );
+});
 
 type BarContextValue = {
   /** Fractional tab index the highlight currently sits at. */
@@ -1037,23 +1097,23 @@ const BarContext = createContext<BarContextValue | null>(null);
  * is icon-plus-text and meets the touch-target floor. The bar shows exactly
  * three labelled choices; Household Chat is never a fourth tab.
  *
- * It is a floating capsule rather than an edge-to-edge bar: it shrinks in both
- * dimensions while the content scrolls away under it, one shared highlight
- * physically travels between tabs instead of fading in and out, and dragging
- * along the bar scrubs through the tabs, committing on release.
+ * It is a floating capsule rather than an edge-to-edge bar. One shared
+ * highlight physically travels between tabs instead of fading in and out, and
+ * dragging along the bar scrubs through the tabs, committing on release.
  *
- * Deliberately built from Reanimated and Gesture Handler alone — no SF Symbols
- * and no liquid glass — because both are iOS-only and would leave the Android
- * bar visibly different (SymbolView renders nothing at all there).
+ * Reanimated and Gesture Handler own the motion while Expo Symbols supplies
+ * native SF Symbols on Apple platforms and matching Material Symbols elsewhere.
  */
 export function BottomTabs({
   tabs,
   active,
   onSelect,
+  iconOnly = false,
 }: {
   tabs: readonly TabSpec[];
   active: TabKey;
   onSelect: (key: TabKey) => void;
+  iconOnly?: boolean;
 }) {
   const insets = useSafeAreaInsets();
   const { width: windowWidth } = useWindowDimensions();
@@ -1063,6 +1123,10 @@ export function BottomTabs({
   const isDragging = useSharedValue(false);
   const lastTicked = useSharedValue(-1);
   const tabCount = Math.max(tabs.length, 1);
+
+  const tick = useCallback(() => {
+    if (Platform.OS === 'ios') void Haptics.selectionAsync();
+  }, []);
 
   const selectIndex = useCallback(
     (index: number) => {
@@ -1097,7 +1161,13 @@ export function BottomTabs({
         setMinimized(minimize, 0);
       })
       .onUpdate((event) => {
-        slideIndex.value = indexAtX(event.x, progress.value);
+        const index = indexAtX(event.x, progress.value);
+        slideIndex.value = index;
+        const rounded = Math.round(index);
+        if (rounded !== lastTicked.value) {
+          lastTicked.value = rounded;
+          runOnJS(tick)();
+        }
       })
       .onFinalize(() => {
         // Fires on failure too (the touch was a tap) — only act when the pan
@@ -1123,7 +1193,17 @@ export function BottomTabs({
       });
 
     return Gesture.Race(pan, tap);
-  }, [windowWidth, tabCount, selectIndex, isDragging, lastTicked, slideIndex, minimize, progress]);
+  }, [
+    windowWidth,
+    tabCount,
+    selectIndex,
+    tick,
+    isDragging,
+    lastTicked,
+    slideIndex,
+    minimize,
+    progress,
+  ]);
 
   const barStyle = useAnimatedStyle(() => {
     const height = interpolate(
@@ -1134,7 +1214,6 @@ export function BottomTabs({
     );
     return {
       height,
-      borderRadius: height / 2,
       // The capsule shrinks in both dimensions, not just in height.
       marginHorizontal: interpolate(
         progress.value,
@@ -1143,6 +1222,16 @@ export function BottomTabs({
         Extrapolation.CLAMP,
       ),
     };
+  });
+
+  const shapeStyle = useAnimatedStyle(() => {
+    const height = interpolate(
+      progress.value,
+      [0, 1],
+      [BAR_EXPANDED, BAR_MINIMIZED],
+      Extrapolation.CLAMP,
+    );
+    return { borderRadius: height / 2 };
   });
 
   // One shared highlight that slides between tabs, transform-only so it stays
@@ -1177,50 +1266,71 @@ export function BottomTabs({
   });
 
   const barContext = useMemo(() => ({ slideIndex, isDragging }), [slideIndex, isDragging]);
-  const bottomOffset = Math.max(insets.bottom - 16, 12);
+  const bottomOffset = Math.max(insets.bottom - 14, 10);
+  const dockInsetStyle = useMemo(
+    () => ({ marginHorizontal: BAR_MARGIN, marginBottom: bottomOffset }),
+    [bottomOffset],
+  );
+  const composedBarStyle = useMemo(() => [tabStyles.bar, barStyle], [barStyle]);
+  const composedMaterialStyle = useMemo(() => [tabStyles.material, shapeStyle], [shapeStyle]);
+  const composedFallbackStyle = useMemo(
+    () => [tabStyles.material, tabStyles.fallback, shapeStyle],
+    [shapeStyle],
+  );
+  const composedHighlightStyle = useMemo(() => [tabStyles.pill, highlightStyle], [highlightStyle]);
 
   return (
-    <View
-      pointerEvents="box-none"
-      style={[tabStyles.dock, { marginHorizontal: BAR_MARGIN, marginBottom: bottomOffset }]}
-    >
-      <GestureDetector gesture={gesture}>
-        <Reanimated.View style={[tabStyles.bar, barStyle]}>
-          <Reanimated.View style={[tabStyles.pill, highlightStyle]} />
-          <View style={tabStyles.row}>
-            <BarContext.Provider value={barContext}>
-              {tabs.map((tab, index) => (
-                <TabButton
-                  key={tab.key}
-                  tab={tab}
-                  index={index}
-                  isActive={tab.key === active}
-                  onPress={() => onSelect(tab.key)}
-                />
-              ))}
-            </BarContext.Provider>
-          </View>
-        </Reanimated.View>
-      </GestureDetector>
+    <View pointerEvents="box-none" style={tabStyles.dock}>
+      <BottomProgressiveBlur height={bottomOffset + BAR_EXPANDED + BLUR_BLEED} />
+      <View pointerEvents="box-none" style={dockInsetStyle}>
+        <GestureDetector gesture={gesture}>
+          <Reanimated.View style={composedBarStyle}>
+            {isLiquidGlassAvailable() ? (
+              <AnimatedGlassView glassEffectStyle="regular" style={composedMaterialStyle} />
+            ) : (
+              <Reanimated.View style={composedFallbackStyle} />
+            )}
+            <Reanimated.View style={composedHighlightStyle} />
+            <View style={tabStyles.row}>
+              <BarContext.Provider value={barContext}>
+                {tabs.map((tab, index) => (
+                  <TabButton
+                    key={tab.key}
+                    tab={tab}
+                    index={index}
+                    isActive={tab.key === active}
+                    onSelect={onSelect}
+                    iconOnly={iconOnly}
+                  />
+                ))}
+              </BarContext.Provider>
+            </View>
+          </Reanimated.View>
+        </GestureDetector>
+      </View>
     </View>
   );
 }
 
-function TabButton({
+const TabButton = memo(function TabButton({
   tab,
   index,
   isActive,
-  onPress,
+  onSelect,
+  iconOnly,
 }: {
   tab: TabSpec;
   index: number;
   isActive: boolean;
-  onPress: () => void;
+  onSelect: (key: TabKey) => void;
+  iconOnly: boolean;
 }) {
   const minimize = useMinimizeState();
   const progress = minimize.progress;
   const bar = useContext(BarContext);
   const slideIndex = bar?.slideIndex;
+  const onPress = useCallback(() => onSelect(tab.key), [onSelect, tab.key]);
+  const accessibilityState = useMemo(() => ({ selected: isActive }), [isActive]);
 
   // Covers selection that did not come from the bar itself. While scrubbing the
   // finger owns the highlight, so never fight it with a spring.
@@ -1241,12 +1351,16 @@ function TabButton({
     opacity: slideIndex ? 1 - distance(slideIndex.value) : isActive ? 1 : 0,
   }));
 
+  const inactiveIconStyle = useAnimatedStyle(() => ({
+    opacity: slideIndex ? distance(slideIndex.value) : isActive ? 0 : 1,
+  }));
+
   const labelStyle = useAnimatedStyle(() => ({
     opacity: interpolate(progress.value, [0, 0.4], [1, 0], Extrapolation.CLAMP),
     color: slideIndex
-      ? interpolateColor(distance(slideIndex.value), [0, 1], [colors.accent, colors.inkSoft])
+      ? interpolateColor(distance(slideIndex.value), [0, 1], [colors.coral, colors.inkSoft])
       : isActive
-        ? colors.accent
+        ? colors.coral
         : colors.inkSoft,
   }));
 
@@ -1260,40 +1374,61 @@ function TabButton({
       Extrapolation.CLAMP,
     ),
   }));
+  const composedBoxStyle = useMemo(() => [tabStyles.box, boxStyle], [boxStyle]);
+  const composedInactiveIconStyle = useMemo(
+    () => [tabStyles.iconLayer, inactiveIconStyle],
+    [inactiveIconStyle],
+  );
+  const composedActiveIconStyle = useMemo(
+    () => [StyleSheet.absoluteFill, tabStyles.iconLayer, activeIconStyle],
+    [activeIconStyle],
+  );
+  const composedLabelStyle = useMemo(() => [tabStyles.label, labelStyle], [labelStyle]);
 
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityState={{ selected: isActive }}
+      accessibilityState={accessibilityState}
       accessibilityLabel={tab.label}
       style={tabStyles.tab}
       // The gesture detector swallows ordinary touches; this still runs for
       // VoiceOver and TalkBack activation, which is the path that matters here.
       onPress={onPress}
     >
-      <Reanimated.View style={[tabStyles.box, boxStyle]}>
-        <View>
-          <TabIcon name={tab.icon} color={colors.inkSoft} />
-          <Reanimated.View style={[StyleSheet.absoluteFill, activeIconStyle]}>
-            <TabIcon name={tab.icon} color={colors.accent} />
+      <Reanimated.View style={composedBoxStyle}>
+        <View style={tabStyles.iconFrame}>
+          <Reanimated.View style={composedInactiveIconStyle}>
+            <TabIcon name={tab.icon} color={colors.inkSoft} />
+          </Reanimated.View>
+          <Reanimated.View style={composedActiveIconStyle}>
+            <TabIcon name={tab.icon} color={colors.accent} selected />
           </Reanimated.View>
         </View>
-        <Reanimated.Text numberOfLines={1} style={[tabStyles.label, labelStyle]}>
-          {tab.label}
-        </Reanimated.Text>
+        {!iconOnly ? (
+          <Reanimated.Text numberOfLines={1} style={composedLabelStyle}>
+            {tab.label}
+          </Reanimated.Text>
+        ) : null}
       </Reanimated.View>
     </Pressable>
   );
-}
+});
 
 const tabStyles = StyleSheet.create({
   dock: { position: 'absolute', left: 0, right: 0, bottom: 0 },
   bar: {
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderCurve: 'continuous',
     ...shadow.lift,
+  },
+  material: {
+    position: 'absolute',
+    inset: 0,
+    backgroundColor: colors.glassMaterial,
+    borderCurve: 'continuous',
+  },
+  fallback: {
+    backgroundColor: colors.glassFallback,
+    borderWidth: 1,
+    borderColor: colors.glassBorder,
   },
   row: { flex: 1, flexDirection: 'row', alignItems: 'center', paddingHorizontal: ROW_PAD_H },
   tab: { flex: 1, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
@@ -1303,17 +1438,39 @@ const tabStyles = StyleSheet.create({
     paddingTop: ITEM_PAD_V,
     overflow: 'hidden',
   },
+  iconFrame: {
+    width: ICON_SIZE,
+    height: ICON_SIZE,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  iconLayer: { alignItems: 'center', justifyContent: 'center' },
+  symbol: { width: ICON_SIZE, height: ICON_SIZE },
   pill: {
     position: 'absolute',
     left: 0,
-    backgroundColor: colors.accentSoft,
+    backgroundColor: colors.glassHighlight,
     borderCurve: 'continuous',
+    borderRadius: BAR_EXPANDED / 2,
   },
   label: {
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.2,
+    width: '100%',
+    fontFamily: fonts.semibold,
+    fontSize: 10,
+    lineHeight: 12,
+    fontWeight: '400',
+    letterSpacing: 0,
+    textAlign: 'center',
+    includeFontPadding: false,
     marginTop: ITEM_GAP,
+  },
+  blur: { position: 'absolute', left: 0, right: 0, bottom: 0 },
+  blurLayer: { position: 'absolute', left: 0, right: 0 },
+  blurWash: {
+    position: 'absolute',
+    inset: 0,
+    experimental_backgroundImage:
+      'linear-gradient(to top, rgba(253,252,248,0.96) 0%, rgba(253,252,248,0.54) 42%, rgba(253,252,248,0.12) 70%, rgba(253,252,248,0) 92%)',
   },
 });
 
@@ -1328,6 +1485,12 @@ const tabStyles = StyleSheet.create({
  */
 export function ChatHeaderAction({ unread, onPress }: { unread?: number; onPress: () => void }) {
   const pulse = useRef(new Animated.Value(0)).current;
+  const badgeStyle = useMemo(
+    () => ({
+      transform: [{ scale: pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.35] }) }],
+    }),
+    [pulse],
+  );
 
   useEffect(() => {
     if (!unread) return;
@@ -1346,16 +1509,7 @@ export function ChatHeaderAction({ unread, onPress }: { unread?: number; onPress
     >
       <TabIcon name="chat" color={colors.accent} />
       {unread ? (
-        <Animated.View
-          style={[
-            chatStyles.badge,
-            {
-              transform: [
-                { scale: pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.35] }) },
-              ],
-            },
-          ]}
-        >
+        <Animated.View style={StyleSheet.compose(chatStyles.badge, badgeStyle)}>
           <Text style={chatStyles.badgeText}>{unread > 9 ? '9+' : unread}</Text>
         </Animated.View>
       ) : null}
@@ -1365,9 +1519,9 @@ export function ChatHeaderAction({ unread, onPress }: { unread?: number; onPress
 
 const chatStyles = StyleSheet.create({
   button: {
-    minHeight: 46,
-    width: 46,
-    borderRadius: 23,
+    minHeight: 44,
+    width: 44,
+    borderRadius: 21,
     backgroundColor: colors.card,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1387,5 +1541,5 @@ const chatStyles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  badgeText: { color: '#FFFFFF', fontSize: 10, fontWeight: '800' },
+  badgeText: { color: colors.card, fontSize: 10, fontWeight: '800' },
 });

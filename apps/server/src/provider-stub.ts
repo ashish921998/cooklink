@@ -62,6 +62,7 @@ const STUB_ADDRESSES: ProviderAddress[] = [
 const STUB_PRODUCTS: ProviderProduct[] = [
   {
     id: 'prod-tomato-500',
+    skuId: 'sku-tomato-500',
     name: 'Tomato',
     brand: 'Fresh Farms',
     variant: 'Ripe',
@@ -73,9 +74,11 @@ const STUB_PRODUCTS: ProviderProduct[] = [
     storeId: 'store-1',
     storeName: 'Instamart Store 1',
     imageUrl: null,
+    similar: false,
   },
   {
     id: 'prod-tomato-1kg',
+    skuId: 'sku-tomato-1kg',
     name: 'Tomato',
     brand: 'Fresh Farms',
     variant: 'Ripe',
@@ -87,9 +90,11 @@ const STUB_PRODUCTS: ProviderProduct[] = [
     storeId: 'store-1',
     storeName: 'Instamart Store 1',
     imageUrl: null,
+    similar: false,
   },
   {
     id: 'prod-tomato-cherry',
+    skuId: 'sku-tomato-cherry',
     name: 'Cherry Tomato',
     brand: 'Pure Veg',
     variant: 'Cherry',
@@ -101,9 +106,11 @@ const STUB_PRODUCTS: ProviderProduct[] = [
     storeId: 'store-1',
     storeName: 'Instamart Store 1',
     imageUrl: null,
+    similar: true,
   },
   {
     id: 'prod-onion-500',
+    skuId: 'sku-onion-500',
     name: 'Onion',
     brand: 'Fresh Farms',
     variant: null,
@@ -115,9 +122,11 @@ const STUB_PRODUCTS: ProviderProduct[] = [
     storeId: 'store-1',
     storeName: 'Instamart Store 1',
     imageUrl: null,
+    similar: false,
   },
   {
     id: 'prod-toordal-500',
+    skuId: 'sku-toordal-500',
     name: 'Toor Dal',
     brand: 'Tata Sampann',
     variant: 'Unpolished',
@@ -129,9 +138,11 @@ const STUB_PRODUCTS: ProviderProduct[] = [
     storeId: 'store-2',
     storeName: 'Instamart Store 2',
     imageUrl: null,
+    similar: false,
   },
   {
     id: 'prod-toordal-1kg',
+    skuId: 'sku-toordal-1kg',
     name: 'Toor Dal',
     brand: 'Tata Sampann',
     variant: 'Unpolished',
@@ -143,9 +154,11 @@ const STUB_PRODUCTS: ProviderProduct[] = [
     storeId: 'store-2',
     storeName: 'Instamart Store 2',
     imageUrl: null,
+    similar: false,
   },
   {
     id: 'prod-milk-500',
+    skuId: 'sku-milk-500',
     name: 'Toned Milk',
     brand: 'Nandini',
     variant: 'Toned',
@@ -157,10 +170,12 @@ const STUB_PRODUCTS: ProviderProduct[] = [
     storeId: 'store-1',
     storeName: 'Instamart Store 1',
     imageUrl: null,
+    similar: false,
   },
   // A product that is unavailable so tests can exercise AC#5 alternatives.
   {
     id: 'prod-toordal-2kg',
+    skuId: 'sku-toordal-2kg',
     name: 'Toor Dal',
     brand: 'Organic Tattva',
     variant: 'Organic',
@@ -172,6 +187,7 @@ const STUB_PRODUCTS: ProviderProduct[] = [
     storeId: 'store-2',
     storeName: 'Instamart Store 2',
     imageUrl: null,
+    similar: true,
   },
 ];
 
@@ -227,6 +243,7 @@ export function createStubProvider(options: StubProviderOptions = {}): GroceryPr
   function toCartItem(p: ProviderProduct, qty: number): ProviderCartItem {
     return {
       productId: p.id,
+      skuId: p.skuId,
       name: p.name,
       brand: p.brand,
       variant: p.variant,
@@ -342,6 +359,12 @@ export function createStubProvider(options: StubProviderOptions = {}): GroceryPr
       return buildReview(addressId, [...newCart.values()]);
     },
 
+    async clearCart(memberUserId, addressId) {
+      const member = ensureMember(memberUserId);
+      member.cart.clear();
+      member.addressId = addressId;
+    },
+
     async getAlternatives({ memberUserId, addressId, productId }) {
       ensureMember(memberUserId);
       const original = STUB_PRODUCTS.find((p) => p.id === productId);
@@ -381,7 +404,9 @@ export function createStubProvider(options: StubProviderOptions = {}): GroceryPr
 
       // Validate the payment method is one the provider returned (AC#1/AC#3).
       const pm = STUB_PAYMENT_METHODS.find((p) => p.id === paymentMethodId);
-      if (!pm) throw new ProviderError('Payment method not available', 'upstream_error');
+      if (!pm) {
+        throw new ProviderError('Payment method not available', 'payment_method_unavailable', 400);
+      }
 
       // Group line items by store → one ProviderOrder per resulting store
       // (issue 11, AC#7 — multi-store partial success shown per order).

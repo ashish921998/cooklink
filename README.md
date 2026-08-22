@@ -39,6 +39,12 @@ pnpm db:migrate         # apply to a local MySQL (DATABASE_URL)
 pnpm db:seed            # seed minimal dev data
 pnpm dev:server         # http://localhost:3000
 
+# Real Instamart MCP (server-side only)
+# COOKLINK_SWIGGY_MODE=production
+# COOKLINK_PUBLIC_API_URL=https://api.example.com
+# SWIGGY_TOKEN_ENCRYPTION_KEY=$(openssl rand -base64 32)
+# Keep COOKLINK_ORDERING_ENABLED=false until checkout is approved for the environment.
+
 # Mobile
 pnpm dev:mobile         # Expo dev server
 ```
@@ -49,6 +55,9 @@ variable; a CI grep test enforces this.
 
 ## Status
 
-See [`IMPLEMENTATION.md`](./IMPLEMENTATION.md) for what is implemented, what is
-stubbed, and what is feature-gated (notably: real Instamart ordering is
-unavailable until Swiggy grants production access).
+The real Instamart MCP adapter, delegated OAuth, encrypted per-member sessions,
+address/product/cart synchronization, confirmation, checkout recovery, and
+tracking surfaces are implemented. Local development can still select the
+deterministic provider stub. Actual order placement remains independently
+gated by `COOKLINK_ORDERING_ENABLED` so staging/read-only verification cannot
+place an order accidentally.

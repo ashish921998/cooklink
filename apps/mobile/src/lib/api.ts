@@ -1,5 +1,4 @@
-import { useCallback } from 'react';
-import { useAuth } from '@clerk/expo';
+import { createContext, useCallback, useContext } from 'react';
 
 const apiUrl = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
 export const devAuthEnabled = __DEV__ && process.env.EXPO_PUBLIC_COOKLINK_DEV_AUTH === 'true';
@@ -12,6 +11,21 @@ export const devAuthHeaders: Record<string, string> = devAuthEnabled
       'x-cooklink-dev-name': process.env.EXPO_PUBLIC_COOKLINK_DEV_NAME ?? 'Mobile Dev Owner',
     }
   : {};
+
+export type ApiRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
+export type TokenResolver = (() => Promise<string | null>) | null;
+
+/** Runtime injection points: Clerk supplies a token resolver; design preview supplies a local API. */
+export const ApiTokenResolverContext = createContext<TokenResolver>(null);
+export const ApiRequestOverrideContext = createContext<ApiRequest | null>(null);
+
+const resolveWithoutToken = async () => null;
+
+/** A stable token capability for API and authorized-media consumers. */
+export function useTokenResolver(): Exclude<TokenResolver, null> {
+  const runtimeTokenResolver = useContext(ApiTokenResolverContext);
+  return devAuthEnabled ? resolveWithoutToken : (runtimeTokenResolver ?? resolveWithoutToken);
+}
 
 /**
  * A failed API request. Carries the HTTP status so callers can distinguish a
@@ -34,12 +48,13 @@ export class ApiError extends Error {
 }
 
 export function useApi() {
-  const { getToken } = useAuth();
-  const tokenResolver = devAuthEnabled ? null : getToken;
+  const tokenResolver = useTokenResolver();
+  const requestOverride = useContext(ApiRequestOverrideContext);
 
   return useCallback(
     async function request<T>(path: string, init?: RequestInit): Promise<T> {
-      const token = tokenResolver ? await tokenResolver() : null;
+      if (requestOverride) return requestOverride<T>(path, init);
+      const token = await tokenResolver();
       const res = await fetch(`${apiUrl}${path}`, {
         ...init,
         headers: {
@@ -54,6 +69,6 @@ export function useApi() {
       }
       return (await res.json()) as T;
     },
-    [tokenResolver],
+    [requestOverride, tokenResolver],
   );
 }

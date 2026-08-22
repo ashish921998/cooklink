@@ -4,6 +4,41 @@ This document states exactly what is locally proven, what is feature-gated, and
 what still requires account-level production approval before V1 ships. It is
 the handoff evidence for issue 13.
 
+## Distribution readiness (2026-08-21)
+
+**Status: blocked for public distribution; locally buildable and linked to EAS.**
+
+The mobile project now has valid Expo SDK 57 configuration, store version
+`1.0.0` / build `1`, explicit photo and microphone permission copy, encryption
+declaration, aligned native dependencies, and EAS preview/production profiles.
+Expo Doctor passes and production-mode JavaScript exports complete for iOS and
+Android.
+
+This checkout is linked to the pre-existing `@ashish921998/cooklink` EAS
+project (`72cd23d6-40d5-4fb4-84b8-98adb8ebc652`). Local typecheck, lint, tests,
+formatting, and an iOS production-mode JavaScript export pass.
+
+Public distribution still requires the following account and product gates:
+
+- Create the Cooklink record in App Store Connect. No app currently matches
+  `com.cooklink.app`, so submission validation cannot run yet. App creation was
+  attempted on 2026-08-21 and reached Apple's two-factor authentication gate.
+- Configure the EAS `production` environment with the public Railway API URL
+  and Clerk production publishable key. The EAS production environment
+  currently has no variables; the checked local mobile environment uses
+  localhost, a Clerk test key, and development auth.
+- Promote and validate the backend with Clerk production credentials. Railway
+  is healthy, but its current deployment uses Clerk test keys and predates the
+  current application work.
+- Provide a public privacy-policy URL, complete App Privacy disclosures, add an
+  in-app account-deletion path, prepare store metadata/screenshots, and supply
+  App Review contact/demo-account details.
+- Complete physical-device media/auth/accessibility checks and the external
+  provider/content gates already listed below.
+- Persist Swiggy OAuth/PKCE transactions before enabling more than one server
+  replica. The current ten-minute transaction state is process-local, so a
+  deploy or restart during sign-in requires the member to start again.
+
 ## Summary
 
 | Gate | Status | Evidence |

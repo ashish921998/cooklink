@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ScrollView, StyleSheet, View } from 'react-native';
 import { useAccessProbe, type HouseholdSummary } from '../lib/households';
 import {
   Avatar,
@@ -22,6 +22,7 @@ import { Mascot, MascotState } from '../components/Mascot';
 import { MealPlanScreen } from './MealPlan';
 import { GroceriesScreen } from './Groceries';
 import { ChatScreen } from './Chat';
+import { Text } from '../components/Typography';
 
 const COOK_TABS: readonly TabSpec[] = [
   { key: 'chat', label: 'Chat', icon: 'chat' },
@@ -50,6 +51,14 @@ export function CookShell({
   // (issue 03 — do not auto-open the sole Household). `openId` is only ever
   // set by an explicit tap on a row.
   const [openId, setOpenId] = useState<string | null>(null);
+  const selectHousehold = useCallback(
+    (householdId: string) => {
+      setOpenId(householdId);
+      onSelectHousehold(householdId);
+    },
+    [onSelectHousehold],
+  );
+  const backToList = useCallback(() => setOpenId(null), []);
 
   // Reset any open Household whenever the available set changes so a removed
   // Cook Household never lingers on screen.
@@ -60,20 +69,10 @@ export function CookShell({
   const selected = households.find((h) => h.id === openId) ?? null;
 
   if (!selected) {
-    return (
-      <CookHouseholdList
-        households={households}
-        onSelect={(householdId) => {
-          setOpenId(householdId);
-          onSelectHousehold(householdId);
-        }}
-      />
-    );
+    return <CookHouseholdList households={households} onSelect={selectHousehold} />;
   }
 
-  return (
-    <CookHousehold key={selected.id} household={selected} onBackToList={() => setOpenId(null)} />
-  );
+  return <CookHousehold key={selected.id} household={selected} onBackToList={backToList} />;
 }
 
 /**
@@ -115,24 +114,38 @@ function CookHouseholdList({
 
       {households.map((household, i) => (
         <FadeSlideIn key={household.id} delay={90 + i * 60}>
-          <PressableScale
-            accessibilityRole="button"
-            accessibilityLabel={`Open ${household.name} chat`}
-            style={cook.row}
-            onPress={() => onSelect(household.id)}
-          >
-            <Avatar name={household.name} size={48} />
-            <View style={cook.rowText}>
-              <Text style={cook.rowName} numberOfLines={1}>
-                {household.name}
-              </Text>
-              <Text style={cook.rowNote}>Chat · Meal Plan · Groceries</Text>
-            </View>
-            <Text style={cook.chevron}>›</Text>
-          </PressableScale>
+          <CookHouseholdRow household={household} onSelect={onSelect} />
         </FadeSlideIn>
       ))}
     </ScrollView>
+  );
+}
+
+function CookHouseholdRow({
+  household,
+  onSelect,
+}: {
+  household: HouseholdSummary;
+  onSelect: (householdId: string) => void;
+}) {
+  const selectHousehold = useCallback(() => onSelect(household.id), [household.id, onSelect]);
+
+  return (
+    <PressableScale
+      accessibilityRole="button"
+      accessibilityLabel={`Open ${household.name} chat`}
+      style={cook.row}
+      onPress={selectHousehold}
+    >
+      <Avatar name={household.name} size={48} />
+      <View style={cook.rowText}>
+        <Text style={cook.rowName} numberOfLines={1}>
+          {household.name}
+        </Text>
+        <Text style={cook.rowNote}>Chat · Meal Plan · Groceries</Text>
+      </View>
+      <Text style={cook.chevron}>›</Text>
+    </PressableScale>
   );
 }
 
@@ -149,8 +162,13 @@ function CookHousehold({
   onBackToList: () => void;
 }) {
   const [tab, setTab] = useState<TabKey>('chat');
+  const [recipeOpen, setRecipeOpen] = useState(false);
   const { revoked } = useAccessProbe(household.id);
   const clearance = useTabBarClearance();
+  const chatContainerStyle = useMemo(
+    () => ({ flex: 1, paddingBottom: clearance - space.xl }),
+    [clearance],
+  );
 
   // A removed Cook exits immediately with a plain explanation (issue 03).
   if (revoked)
@@ -170,34 +188,40 @@ function CookHousehold({
           // Chat ends in a composer rather than a scroll, so it cannot reserve
           // room for the floating bar itself — the shell holds it clear. Its own
           // edge padding is subtracted so the gap does not double up.
-          <View style={{ flex: 1, paddingBottom: clearance - space.xl }}>
+          <View style={chatContainerStyle}>
             <ChatScreen household={household} backLabel="Kitchens" onBack={onBackToList} />
           </View>
         ) : (
           <>
-            <View style={cook.openHeader}>
-              <PressableScale
-                accessibilityRole="button"
-                accessibilityLabel="Back to your kitchens"
-                style={cook.backButton}
-                onPress={onBackToList}
-              >
-                <Text style={styles.backLink}>‹</Text>
-              </PressableScale>
-              <Avatar name={household.name} size={36} />
-              <Text style={cook.openName} numberOfLines={1}>
-                {household.name}
-              </Text>
-              <Chip label="Cook" tint={colors.accentSoft} ink={colors.accent} />
-            </View>
+            {!recipeOpen ? (
+              <View style={cook.openHeader}>
+                <PressableScale
+                  accessibilityRole="button"
+                  accessibilityLabel="Back to your kitchens"
+                  style={cook.backButton}
+                  onPress={onBackToList}
+                >
+                  <Text style={styles.backLink}>‹</Text>
+                </PressableScale>
+                <Avatar name={household.name} size={36} />
+                <Text style={cook.openName} numberOfLines={1}>
+                  {household.name}
+                </Text>
+                <Chip label="Cook" tint={colors.accentSoft} ink={colors.accent} />
+              </View>
+            ) : null}
             {tab === 'mealPlan' ? (
-              <MealPlanScreen household={household} />
+              <MealPlanScreen
+                household={household}
+                includeTopSafeArea={recipeOpen}
+                onRecipeOpenChange={setRecipeOpen}
+              />
             ) : (
               <GroceriesScreen household={household} />
             )}
           </>
         )}
-        <BottomTabs tabs={COOK_TABS} active={tab} onSelect={setTab} />
+        {!recipeOpen ? <BottomTabs tabs={COOK_TABS} active={tab} onSelect={setTab} /> : null}
       </View>
     </TabBarMinimizeProvider>
   );

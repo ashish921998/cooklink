@@ -1,5 +1,6 @@
 import { Redirect, useRouter, useLocalSearchParams } from 'expo-router';
 import { useUser } from '@clerk/expo';
+import { useCallback } from 'react';
 import { AcceptInvite } from '../src/screens/AcceptInvite';
 import { devAuthEnabled } from '../src/lib/api';
 import { Loading } from '../src/components/ui';
@@ -22,12 +23,20 @@ import { Loading } from '../src/components/ui';
 export default function InviteRoute() {
   const { isLoaded, isSignedIn } = useUser();
   const router = useRouter();
-  const params = useLocalSearchParams<{ token?: string | string[] }>();
+  const params = useLocalSearchParams<{
+    token?: string | string[];
+    expected_role?: string | string[];
+  }>();
+  const returnHome = useCallback(() => router.replace('/'), [router]);
 
   if (!devAuthEnabled && !isLoaded) return <Loading />;
 
   const raw = params.token;
   const prefillToken = Array.isArray(raw) ? (raw[0] ?? '') : (raw ?? '');
+  const rawExpectedRole = params.expected_role;
+  const expectedRoleValue = Array.isArray(rawExpectedRole) ? rawExpectedRole[0] : rawExpectedRole;
+  const expectedRole =
+    expectedRoleValue === 'member' || expectedRoleValue === 'cook' ? expectedRoleValue : undefined;
 
   // Redirect declaratively: navigating from the render body re-enters the
   // navigator on every render, which trips React's update-depth limit.
@@ -42,8 +51,9 @@ export default function InviteRoute() {
   return (
     <AcceptInvite
       prefillToken={prefillToken}
-      onAccepted={() => router.replace('/')}
-      onCancel={() => router.replace('/')}
+      expectedRole={expectedRole}
+      onAccepted={returnHome}
+      onCancel={returnHome}
     />
   );
 }

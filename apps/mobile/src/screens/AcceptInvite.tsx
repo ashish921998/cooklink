@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useCallback, useState } from 'react';
+import { ScrollView, StyleSheet, View } from 'react-native';
 import { useApi } from '../lib/api';
 import { ApiError } from '../lib/api';
 import {
@@ -14,6 +14,7 @@ import {
   styles,
 } from '../components/ui';
 import { Mascot } from '../components/Mascot';
+import { Text, TextInput } from '../components/Typography';
 
 /**
  * Accept a phone-bound Household Invite (issue 03 — the mobile half of invite
@@ -59,10 +60,12 @@ function messageFor(err: unknown): string {
 
 export function AcceptInvite({
   prefillToken,
+  expectedRole,
   onAccepted,
   onCancel,
 }: {
   prefillToken: string;
+  expectedRole?: 'member' | 'cook';
   onAccepted: (householdId: string, role: string) => void | Promise<void>;
   onCancel: () => void;
 }) {
@@ -71,8 +74,26 @@ export function AcceptInvite({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const eyebrow =
+    expectedRole === 'cook'
+      ? 'Hired cook'
+      : expectedRole === 'member'
+        ? 'Household member'
+        : 'Invite';
+  const title =
+    expectedRole === 'cook'
+      ? 'Join a work household'
+      : expectedRole === 'member'
+        ? 'Join your household'
+        : 'Join a household';
+  const description =
+    expectedRole === 'cook'
+      ? 'Paste the WhatsApp invite from the household owner. The invite sets your Cook permissions.'
+      : expectedRole === 'member'
+        ? 'Paste the WhatsApp invite from your household owner. The invite sets your Member permissions.'
+        : 'Paste the invite token the household owner sent you on WhatsApp.';
 
-  async function accept() {
+  const accept = useCallback(async () => {
     const trimmed = token.trim();
     if (!trimmed) {
       setError(ACCEPTANCE_MESSAGES['token_required']!);
@@ -93,10 +114,11 @@ export function AcceptInvite({
     } finally {
       setBusy(false);
     }
-  }
+  }, [api, onAccepted, token]);
 
   return (
     <ScrollView
+      testID={`invite-${expectedRole ?? 'generic'}-screen`}
       contentContainerStyle={invite.scroll}
       keyboardShouldPersistTaps="handled"
       showsVerticalScrollIndicator={false}
@@ -109,11 +131,9 @@ export function AcceptInvite({
 
       <FadeSlideIn delay={100}>
         <View style={invite.head}>
-          <Text style={styles.eyebrow}>Invite</Text>
-          <Text style={invite.title}>Join a household</Text>
-          <Text style={styles.subtitle}>
-            Paste the invite token the household owner sent you on WhatsApp.
-          </Text>
+          <Text style={styles.eyebrow}>{eyebrow}</Text>
+          <Text style={invite.title}>{title}</Text>
+          <Text style={styles.subtitle}>{description}</Text>
         </View>
       </FadeSlideIn>
 
@@ -125,7 +145,7 @@ export function AcceptInvite({
           >
             <TextInput
               accessibilityLabel="Invite token"
-              style={[styles.input, invite.tokenInput]}
+              style={TOKEN_INPUT_STYLE}
               value={token}
               onChangeText={setToken}
               placeholder="Paste token"
@@ -139,7 +159,7 @@ export function AcceptInvite({
           <PressableScale
             accessibilityRole="button"
             accessibilityLabel="Accept invite"
-            style={[styles.primaryButton, busy && styles.disabled]}
+            style={busy ? DISABLED_PRIMARY_BUTTON_STYLE : styles.primaryButton}
             disabled={busy}
             onPress={accept}
           >
@@ -183,3 +203,6 @@ const invite = StyleSheet.create({
   tokenInput: { fontSize: 15, letterSpacing: 0.5 },
   notice: { fontSize: 15, fontWeight: '700', color: colors.accent },
 });
+
+const TOKEN_INPUT_STYLE = [styles.input, invite.tokenInput];
+const DISABLED_PRIMARY_BUTTON_STYLE = [styles.primaryButton, styles.disabled];

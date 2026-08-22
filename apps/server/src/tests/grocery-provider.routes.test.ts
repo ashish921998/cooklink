@@ -88,25 +88,25 @@ test(
         {
           method: 'POST',
           headers: ownerHeaders,
-          body: JSON.stringify({ redirectUri: 'https://cooklink.app/oauth/callback' }),
+          body: JSON.stringify({ appReturnUri: 'cooklink://swiggy-callback' }),
         },
       );
       assert.equal(connectRes.status, 200);
       const connect = (await connectRes.json()) as { authorizationUrl: string; state: string };
       assert.ok(connect.authorizationUrl.includes('swiggy.com'));
-
-      // AC#1 — delegated OAuth complete.
-      const completeRes = await app.request(
-        `/v1/households/${householdId}/grocery-provider/complete`,
-        {
-          method: 'POST',
-          headers: ownerHeaders,
-          body: JSON.stringify({ code: 'stub-code', state: connect.state }),
-        },
+      assert.ok(
+        connect.authorizationUrl.includes(
+          encodeURIComponent('http://localhost/oauth/swiggy/callback'),
+        ),
       );
-      assert.equal(completeRes.status, 200);
-      const complete = (await completeRes.json()) as { connected: boolean };
-      assert.equal(complete.connected, true);
+
+      // AC#1 — the browser returns to the unauthenticated server callback,
+      // which exchanges the code and redirects to the allowlisted app scheme.
+      const callbackRes = await app.request(
+        `/oauth/swiggy/callback?code=stub-code&state=${encodeURIComponent(connect.state)}`,
+      );
+      assert.equal(callbackRes.status, 302);
+      assert.equal(callbackRes.headers.get('location'), 'cooklink://swiggy-callback?connected=1');
 
       // AC#2 — the member's delivery addresses.
       const addrRes = await app.request(

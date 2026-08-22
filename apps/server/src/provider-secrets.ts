@@ -8,11 +8,16 @@
 export const PROVIDER_SECRET_NAMES = [
   'CLERK_SECRET',
   'DATABASE_URL',
-  'SWIGGY',
-  'ELEVEN',
-  'ELEVENLABS',
-  'OPENAI',
-  'GEMINI',
+  'SWIGGY_TOKEN',
+  'SWIGGY_SECRET',
+  'SWIGGY_CLIENT_SECRET',
+  'SWIGGY_CREDENTIAL',
+  'SWIGGY_PASSWORD',
+  'SWIGGY_ENCRYPTION',
+  'ELEVENLABS_API_KEY',
+  'ELEVEN_API_KEY',
+  'OPENAI_API_KEY',
+  'GEMINI_API_KEY',
   'GOOGLE_AI_KEY',
   'SENTRY_DSN',
 ] as const;
@@ -25,8 +30,8 @@ export const PROVIDER_SECRET_PATTERN = new RegExp(
 
 /**
  * The mobile bundle may only expose the public Clerk publishable key, the API
- * URL, and the `__DEV__`-only dev-auth fixtures. Every other `EXPO_PUBLIC_*`
- * name is treated as a secret leak (issue 07, AC#7).
+ * URL, and the `__DEV__`-only local tooling flags. Every other
+ * `EXPO_PUBLIC_*` name is treated as a secret leak (issue 07, AC#7).
  *
  * The `EXPO_PUBLIC_COOKLINK_DEV_*` names are not secrets: they carry a dev
  * user id, phone, and display name used solely to bypass Clerk OTP while the
@@ -41,4 +46,5 @@ export const ALLOWED_EXPO_PUBLIC = new Set([
   'EXPO_PUBLIC_COOKLINK_DEV_USER_ID',
   'EXPO_PUBLIC_COOKLINK_DEV_PHONE',
   'EXPO_PUBLIC_COOKLINK_DEV_NAME',
+  'EXPO_PUBLIC_COOKLINK_DESIGN_PREVIEW',
 ]);

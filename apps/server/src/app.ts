@@ -25,6 +25,8 @@ import {
   rankSearchCandidates,
   refreshSuggestedCart,
   renderEvent,
+  orderableCartItems,
+  scaleRecipe,
   swapMealIdentities,
   todayISO,
   validateMessageShape,
@@ -39,6 +41,7 @@ import {
   type SystemEventType,
   type HouseholdRole,
   type NotificationLevel,
+  type UserId,
   type GroceryProvider,
   type ProductMatch,
   type ProviderProduct,
@@ -227,6 +230,10 @@ export function createApp(db: Database, services?: AppServices) {
   const log = services?.log ?? createLogger();
   const provider = services?.provider ?? createStubProvider();
   const confirmations = services?.confirmations ?? createInMemoryConfirmationStore();
+  const swiggyOAuthCallbacks = new Map<
+    string,
+    { userId: UserId; appReturnUri: string; createdAt: number }
+  >();
   /**
    * Issue 11, AC#9 — real ordering is visibly feature-gated until Swiggy
    * staging and production access are approved. Default to the env var.
@@ -261,6 +268,40 @@ export function createApp(db: Database, services?: AppServices) {
   app.use('*', requestLogger(log));
 
   app.get('/health', (c) => c.json({ ok: true, service: 'cooklink-server' }));
+
+  /**
+   * Browser-facing OAuth callback. Swiggy accepts localhost/HTTPS callbacks,
+   * not arbitrary app schemes, so the server exchanges the code and then
+   * returns the member to Cooklink without exposing the authorization code to
+   * the mobile app.
+   */
+  app.get('/oauth/swiggy/callback', async (c) => {
+    const state = c.req.query('state') ?? '';
+    const code = c.req.query('code') ?? '';
+    const oauthError = c.req.query('error') ?? '';
+    const pending = swiggyOAuthCallbacks.get(state);
+    swiggyOAuthCallbacks.delete(state);
+    if (!pending || Date.now() - pending.createdAt > 10 * 60_000) {
+      return c.text(
+        'This Cooklink Swiggy sign-in has expired. Return to Cooklink and try again.',
+        400,
+      );
+    }
+    const returnUrl = new URL(pending.appReturnUri);
+    if (oauthError || !code) {
+      returnUrl.searchParams.set('error', oauthError || 'authorization_failed');
+      return c.redirect(returnUrl.toString());
+    }
+    try {
+      await provider.completeOAuth({ memberUserId: pending.userId, code, state });
+      returnUrl.searchParams.set('connected', '1');
+      return c.redirect(returnUrl.toString());
+    } catch (error) {
+      log.warn({ msg: 'swiggy.oauth_callback_failed', error });
+      returnUrl.searchParams.set('error', 'token_exchange_failed');
+      return c.redirect(returnUrl.toString());
+    }
+  });
 
   app.use('/v1/*', authMiddleware(db));
 
@@ -369,6 +410,60 @@ export function createApp(db: Database, services?: AppServices) {
         dietStyle: r.recipe.dietStyle,
         dietMismatch: r.dietMismatch,
       })),
+    });
+  });
+
+  /**
+   * Read the recipe behind one planned meal. Free-text/generated slots may not
+   * have a durable recipe yet; those return `recipe: null` so the mobile app
+   * can show the meal honestly without inventing ingredients or instructions.
+   */
+  app.get('/v1/households/:householdId/meal-plan/meals/:mealId/recipe', async (c) => {
+    const user = c.get('authUser');
+    const householdId = c.req.param('householdId');
+    const principal = await authorization.authorizeCapability(
+      id<'UserId'>(user.id),
+      id<'HouseholdId'>(householdId),
+      'read_chat',
+    );
+    const mealId = c.req.param('mealId');
+    const [meal] = await db
+      .select()
+      .from(plannedMeals)
+      .where(and(eq(plannedMeals.id, mealId), eq(plannedMeals.householdId, principal.householdId)))
+      .limit(1);
+    if (!meal) return c.json({ error: 'not_found' }, 404);
+    if (!meal.recipeId) return c.json({ recipe: null });
+
+    const [row] = await db.select().from(recipes).where(eq(recipes.id, meal.recipeId)).limit(1);
+    if (!row) return c.json({ recipe: null });
+    const scaled = scaleRecipe(
+      {
+        id: id<'RecipeId'>(row.id),
+        name: row.name,
+        nameHi: row.nameHi,
+        baseServings: row.baseServings,
+        ingredients: row.ingredients as never,
+        steps: row.steps,
+        stepsHi: row.stepsHi,
+        provenance: row.provenance,
+        dietStyle: row.dietStyle,
+        mealStyle: row.mealStyle,
+        mealTypes: row.mealTypes as never,
+      },
+      meal.servings,
+    );
+    return c.json({
+      recipe: {
+        id: scaled.id,
+        name: scaled.name,
+        nameHi: scaled.nameHi,
+        steps: scaled.steps,
+        stepsHi: scaled.stepsHi,
+        provenance: scaled.provenance,
+        servings: meal.servings,
+        ingredients: scaled.scaledIngredients,
+      },
     });
   });
 
@@ -2420,14 +2515,37 @@ export function createApp(db: Database, services?: AppServices) {
       id<'HouseholdId'>(householdId),
       'review_place_order',
     );
-    const body: { redirectUri?: string } = await c.req.json().catch(() => ({}));
-    const redirectUri = body.redirectUri ?? '';
+    const body: { redirectUri?: string; appReturnUri?: string } = await c.req
+      .json()
+      .catch(() => ({}));
+    const appReturnUri = body.appReturnUri ?? '';
+    if (appReturnUri && !isCooklinkReturnUri(appReturnUri)) {
+      return c.json({ error: 'invalid_app_return_uri' }, 400);
+    }
+    const publicApiUrl = process.env.COOKLINK_PUBLIC_API_URL ?? new URL(c.req.url).origin;
+    const redirectUri = appReturnUri
+      ? new URL('/oauth/swiggy/callback', publicApiUrl).toString()
+      : (body.redirectUri ?? '');
     if (!redirectUri) return c.json({ error: 'redirect_uri_required' }, 400);
-    const result = await provider.startOAuth({
-      memberUserId: principal.userId,
-      redirectUri,
-    });
-    return c.json(result);
+    try {
+      const result = await provider.startOAuth({
+        memberUserId: principal.userId,
+        redirectUri,
+      });
+      if (appReturnUri) {
+        swiggyOAuthCallbacks.set(result.state, {
+          userId: principal.userId,
+          appReturnUri,
+          createdAt: Date.now(),
+        });
+        setTimeout(() => swiggyOAuthCallbacks.delete(result.state), 10 * 60_000).unref?.();
+      }
+      return c.json(result);
+    } catch (err) {
+      if (err instanceof ProviderError)
+        return c.json({ error: err.code, message: err.message }, providerErrorStatus(err));
+      throw err;
+    }
   });
 
   /** Complete the delegated OAuth callback (AC#1). */
@@ -2441,12 +2559,18 @@ export function createApp(db: Database, services?: AppServices) {
     );
     const body: { code?: string; state?: string } = await c.req.json().catch(() => ({}));
     if (!body.code || !body.state) return c.json({ error: 'code_and_state_required' }, 400);
-    const result = await provider.completeOAuth({
-      memberUserId: principal.userId,
-      code: body.code,
-      state: body.state,
-    });
-    return c.json(result);
+    try {
+      const result = await provider.completeOAuth({
+        memberUserId: principal.userId,
+        code: body.code,
+        state: body.state,
+      });
+      return c.json(result);
+    } catch (err) {
+      if (err instanceof ProviderError)
+        return c.json({ error: err.code, message: err.message }, providerErrorStatus(err));
+      throw err;
+    }
   });
 
   /** AC#1 — connection status. Cooks get 404; only Members/Owners see this. */
@@ -2458,8 +2582,14 @@ export function createApp(db: Database, services?: AppServices) {
       id<'HouseholdId'>(householdId),
       'review_place_order',
     );
-    const status = await provider.getConnectionStatus(principal.userId);
-    return c.json(status);
+    try {
+      const status = await provider.getConnectionStatus(principal.userId);
+      return c.json(status);
+    } catch (err) {
+      if (err instanceof ProviderError)
+        return c.json({ error: err.code, message: err.message }, providerErrorStatus(err));
+      throw err;
+    }
   });
 
   /** Disconnect the member's Swiggy account (AC#1). */
@@ -2565,6 +2695,9 @@ export function createApp(db: Database, services?: AppServices) {
       )
       .limit(1);
     if (!cartRow) return c.json({ error: 'cart_item_not_found' }, 404);
+    if (cartRow.memberState !== 'kept') {
+      return c.json({ error: 'cart_item_not_approved' }, 409);
+    }
 
     // Fetch the product from the provider to persist an exact snapshot.
     let product: ProviderProduct;
@@ -2614,13 +2747,17 @@ export function createApp(db: Database, services?: AppServices) {
     );
     const addressId = c.req.query('addressId') ?? '';
     const repo = new DrizzleRepository(db);
-    const cartItems = await refreshSuggestedCart(
+    const refreshedCartItems = await refreshSuggestedCart(
       repo,
       principal.householdId,
       todayISO(),
       new Date(),
     );
-    const matches = await repo.getProductMatches(principal.householdId);
+    const cartItems = orderableCartItems(refreshedCartItems);
+    const keptIds = new Set(cartItems.map((item) => item.id));
+    const matches = (await repo.getProductMatches(principal.householdId)).filter(
+      (match) => keptIds.has(match.cartItemId) && (!addressId || match.addressId === addressId),
+    );
     // Search products for unresolved cart lines so the client gets candidates.
     const searchResults = new Map<string, ProviderProduct[]>();
     if (addressId) {
@@ -2679,7 +2816,13 @@ export function createApp(db: Database, services?: AppServices) {
     const mode = body.mode === 'replace' ? 'replace' : 'preserve';
 
     const repo = new DrizzleRepository(db);
-    const matches = await repo.getProductMatches(principal.householdId);
+    const keptCartItems = orderableCartItems(
+      await refreshSuggestedCart(repo, principal.householdId, todayISO(), new Date()),
+    );
+    const keptIds = new Set(keptCartItems.map((item) => item.id));
+    const matches = (await repo.getProductMatches(principal.householdId)).filter(
+      (match) => keptIds.has(match.cartItemId) && match.addressId === body.addressId,
+    );
     if (matches.length === 0) return c.json({ error: 'no_products_selected' }, 400);
 
     // Load the current Instamart cart so preserve/replace is deliberate (AC#4).
@@ -2693,7 +2836,11 @@ export function createApp(db: Database, services?: AppServices) {
       throw err;
     }
 
-    const intendedItems = matches.map((m) => ({ productId: m.productId, quantity: m.quantity }));
+    const intendedItems = matches.map((m) => ({
+      productId: m.productId,
+      skuId: m.product.skuId,
+      quantity: m.quantity,
+    }));
     const plan = buildCartUpdatePlan({ currentItems, intendedItems, mode });
 
     try {
@@ -2737,6 +2884,27 @@ export function createApp(db: Database, services?: AppServices) {
     } catch (err) {
       if (err instanceof ProviderError)
         return c.json({ error: err.code }, providerErrorStatus(err));
+      throw err;
+    }
+  });
+
+  /** Clear a Member's synchronized Instamart cart after explicit action. */
+  app.post('/v1/households/:householdId/grocery-provider/cart/clear', async (c) => {
+    const user = c.get('authUser');
+    const householdId = c.req.param('householdId');
+    const principal = await authorization.authorizeCapability(
+      id<'UserId'>(user.id),
+      id<'HouseholdId'>(householdId),
+      'review_place_order',
+    );
+    const body: { addressId?: string } = await c.req.json().catch(() => ({}));
+    if (!body.addressId) return c.json({ error: 'address_id_required' }, 400);
+    try {
+      await provider.clearCart(principal.userId, body.addressId);
+      return c.json({ cleared: true });
+    } catch (err) {
+      if (err instanceof ProviderError)
+        return c.json({ error: err.code, message: err.message }, providerErrorStatus(err));
       throw err;
     }
   });
@@ -2910,6 +3078,28 @@ export function createApp(db: Database, services?: AppServices) {
       return c.json({ error: 'ordering_disabled' }, 403);
     }
 
+    // Instamart documents a ₹99 minimum. Keep the Member in cart review so
+    // they can add an item; this is not an app handoff or a retryable failure.
+    if (decision.reason === 'min_order_not_met') {
+      await repo.appendCheckoutAudit({
+        idempotencyKey: 'n/a',
+        membershipId: principal.membershipId,
+        householdId: principal.householdId,
+        cartTotalCents: review.totalCents,
+        paymentMethod: confirmation.paymentMethodId,
+        result: 'failed',
+        verifiedViaGetOrders: false,
+      });
+      return c.json(
+        {
+          error: 'minimum_order_not_met',
+          minimumCents: 9_900,
+          totalCents: review.totalCents,
+        },
+        409,
+      );
+    }
+
     // AC#3 / AC#4 — ineligible carts (over limit or no payment method) fall
     // back to the Instamart app. The fallback relies on the synchronized cart
     // state (already pushed via update_cart) but does NOT promise a direct
@@ -2955,6 +3145,18 @@ export function createApp(db: Database, services?: AppServices) {
         attempt: existing,
       });
     }
+
+    let preCheckoutOrderIds: Set<string> | null = null;
+    try {
+      preCheckoutOrderIds = new Set(
+        (await provider.getOrders(principal.userId)).map((order) => order.id),
+      );
+    } catch {
+      // Recovery must fail closed if we cannot establish the pre-checkout
+      // baseline. A later history response alone cannot prove which attempt
+      // created an order.
+    }
+    const checkoutStartedAt = Date.now();
 
     await repo.beginIdempotencyKey({
       key: idempotencyKey,
@@ -3021,7 +3223,18 @@ export function createApp(db: Database, services?: AppServices) {
         } catch {
           providerOrders = [];
         }
-        const alreadyPlaced = providerOrders.length > 0;
+        const recoveredOrders = preCheckoutOrderIds
+          ? providerOrders.filter((order) => {
+              const placedAt = Date.parse(order.placedAt);
+              return (
+                !preCheckoutOrderIds!.has(order.id) &&
+                Number.isFinite(placedAt) &&
+                placedAt >= checkoutStartedAt - 60_000 &&
+                order.status !== 'failed'
+              );
+            })
+          : [];
+        const alreadyPlaced = recoveredOrders.length > 0;
         const retry = shouldRetryCheckout({
           uncertainFailure: true,
           orderAlreadyPlaced: alreadyPlaced,
@@ -3043,7 +3256,7 @@ export function createApp(db: Database, services?: AppServices) {
 
         if (alreadyPlaced) {
           // Reconcile Cooklink order rows from the verified provider orders.
-          for (const order of providerOrders) {
+          for (const order of recoveredOrders) {
             await repo.createOrder(principal.householdId, principal.membershipId, {
               providerOrderId: order.id,
               status: order.status === 'failed' ? 'failed' : 'placed',
@@ -3052,7 +3265,7 @@ export function createApp(db: Database, services?: AppServices) {
           }
           return c.json({
             result: 'recovered_order_already_placed',
-            orders: providerOrders.map((o) => serializeProviderOrder(o)),
+            orders: recoveredOrders.map((o) => serializeProviderOrder(o)),
             retry: false,
           });
         }
@@ -3947,6 +4160,14 @@ function providerErrorStatus(err: ProviderError): 400 | 401 | 404 | 429 | 502 {
       return 502;
     default:
       return 400;
+  }
+}
+
+function isCooklinkReturnUri(value: string): boolean {
+  try {
+    return new URL(value).protocol === 'cooklink:';
+  } catch {
+    return false;
   }
 }
 
