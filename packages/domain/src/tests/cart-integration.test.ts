@@ -2,12 +2,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   InMemoryRepository,
-  id,
+  brandId,
   deriveConsumption,
   refreshSuggestedCart,
   addDays,
 } from '../index.js';
-import type { PlannedMeal, Recipe } from '../types.js';
+import type { PlannedMeal, Recipe } from '../domain-types.js';
 import type { HouseholdId, MembershipId } from '../ids.js';
 
 /**
@@ -37,7 +37,7 @@ function makeHousehold(name: string) {
 }
 
 const RECIPE: Recipe = {
-  id: id<'RecipeId'>('r-dal'),
+  id: brandId<'RecipeId'>('r-dal'),
   name: 'Dal Tadka',
   nameHi: null,
   baseServings: 4,
@@ -77,7 +77,7 @@ const RECIPE: Recipe = {
 
 async function setupHousehold(repo: InMemoryRepository) {
   const user = await repo.createUser({
-    id: id<'UserId'>('u-owner'),
+    id: brandId<'UserId'>('u-owner'),
     clerkUserId: 'owner',
     phone: '+919000000000',
     displayName: 'Owner',
@@ -100,7 +100,7 @@ function meal(
   return {
     date,
     mealType,
-    recipeId: recipeId ? id<'RecipeId'>(recipeId) : null,
+    recipeId: recipeId ? brandId<'RecipeId'>(recipeId) : null,
     name: 'Dal Tadka',
     servings,
     servingsOverridden: false,
@@ -189,9 +189,9 @@ test('AC1: checkout success alone (no delivery) does NOT update the pantry', asy
 test('AC2: deriveConsumption produces negative deltas for dependable ingredients only', () => {
   const meals: PlannedMeal[] = [
     {
-      ...meal(id<'HouseholdId'>('h'), '2026-01-08', 'dinner', 4),
-      id: id<'PlannedMealId'>('m1'),
-      householdId: id<'HouseholdId'>('h'),
+      ...meal(brandId<'HouseholdId'>('h'), '2026-01-08', 'dinner', 4),
+      id: brandId<'PlannedMealId'>('m1'),
+      householdId: brandId<'HouseholdId'>('h'),
       version: 1,
       updatedBy: null,
       updatedAt: '2026-01-08',
@@ -258,7 +258,7 @@ test('AC2: consumption is recalculated after a recipe swap', async () => {
   // toor_dal is no longer needed.
   const paneerRecipe: Recipe = {
     ...RECIPE,
-    id: id<'RecipeId'>('r-paneer'),
+    id: brandId<'RecipeId'>('r-paneer'),
     name: 'Paneer Bhurji',
     ingredients: [
       {
@@ -301,7 +301,7 @@ test('AC3: a spoiled perishable delivery contributes nothing to the cart', async
   // A recipe that uses milk.
   const milkRecipe: Recipe = {
     ...RECIPE,
-    id: id<'RecipeId'>('r-milk'),
+    id: brandId<'RecipeId'>('r-milk'),
     name: 'Chai',
     ingredients: [
       {
@@ -348,7 +348,7 @@ test('AC3: a fresh perishable within the window counts fully', async () => {
   const { household, ownerMembership } = await setupHousehold(repo);
   const milkRecipe: Recipe = {
     ...RECIPE,
-    id: id<'RecipeId'>('r-milk'),
+    id: brandId<'RecipeId'>('r-milk'),
     name: 'Chai',
     ingredients: [
       {
@@ -393,7 +393,7 @@ test('AC3: unnormalizable ingredients become unknown, never invented', async () 
   // created and no cart line appears because there is no ingredientKey.
   const saltRecipe: Recipe = {
     ...RECIPE,
-    id: id<'RecipeId'>('r-salt'),
+    id: brandId<'RecipeId'>('r-salt'),
     name: 'Salt Water',
     ingredients: [
       {
@@ -440,7 +440,7 @@ test('AC4: an approved grocery request always appears even when the pantry cover
 
   // Cook requests coconut; Member approves.
   const cookUser = await repo.createUser({
-    id: id<'UserId'>('u-cook'),
+    id: brandId<'UserId'>('u-cook'),
     clerkUserId: 'cook',
     phone: '+919000000001',
     displayName: 'Cook',
@@ -482,7 +482,7 @@ test('AC4: an approved request for a likely-available ingredient still appears',
   // Cook requests "toor_dal extra" — even though the pantry says likely
   // available, the Cook saw a real shortage. The approved request overrides.
   const cookUser = await repo.createUser({
-    id: id<'UserId'>('u-cook2'),
+    id: brandId<'UserId'>('u-cook2'),
     clerkUserId: 'cook2',
     phone: '+919000000010',
     displayName: 'Cook 2',
@@ -626,7 +626,7 @@ test('AC8: the cart and pantry ledger are isolated per household', async () => {
   // Two separate repositories simulate two separate household databases.
   const { household: ha, ownerMembership: ownerA } = await setupHousehold(repoA);
   const userB = await repoB.createUser({
-    id: id<'UserId'>('u-owner-b'),
+    id: brandId<'UserId'>('u-owner-b'),
     clerkUserId: 'owner-b',
     phone: '+919000000002',
     displayName: 'Owner B',

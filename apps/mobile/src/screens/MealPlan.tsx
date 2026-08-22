@@ -21,7 +21,7 @@ import {
   radius,
   space,
   styles,
-} from '../components/ui';
+} from '../components/design-system';
 import { Text, TextInput } from '../components/Typography';
 
 /**

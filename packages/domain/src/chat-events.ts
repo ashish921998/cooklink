@@ -1,4 +1,4 @@
-import type { Language, SystemEvent, SystemEventType } from './types.js';
+import type { Language, SystemEvent, SystemEventType } from './domain-types.js';
 
 /**
  * System events are immutable, attributed records of structured transitions.

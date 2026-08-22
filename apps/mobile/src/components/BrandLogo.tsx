@@ -1,7 +1,7 @@
 import { Image, StyleSheet, View } from 'react-native';
 import type { ImageStyle, ViewStyle } from 'react-native';
 import brandMark from '../../assets/brand-mark.png';
-import { colors } from './ui';
+import { colors } from './design-system';
 import { Text } from './Typography';
 
 type BrandLogoProps = {

@@ -6,7 +6,7 @@ import {
   groceryOrderPayload,
   groceryRequestPayload,
 } from '../chat-events.js';
-import type { SystemEvent } from '../types.js';
+import type { SystemEvent } from '../domain-types.js';
 
 function ev(type: SystemEvent['type'], payload: Record<string, unknown>): SystemEvent {
   return {

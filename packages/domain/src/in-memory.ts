@@ -1,4 +1,4 @@
-import { id } from './ids.js';
+import { brandId } from './ids.js';
 import type {
   ChatMessageId,
   DeviceId,
@@ -31,7 +31,7 @@ import type {
   User,
   VoiceTranscript,
   GroceryRequest,
-} from './types.js';
+} from './domain-types.js';
 import type { ProductMatch } from './provider.js';
 
 /**
@@ -105,7 +105,7 @@ export class InMemoryRepository implements Repository {
     household: Omit<Household, 'id' | 'createdAt' | 'closedAt'>,
     ownerId: UserId,
   ): Promise<{ household: Household; ownerMembership: Membership }> {
-    const hid = id<'HouseholdId'>(crypto.randomUUID());
+    const hid = brandId<'HouseholdId'>(crypto.randomUUID());
     const full: Household = {
       ...household,
       id: hid,
@@ -114,7 +114,7 @@ export class InMemoryRepository implements Repository {
     };
     this.households.set(hid as string, full);
     const membership: Membership = {
-      id: id<'MembershipId'>(crypto.randomUUID()),
+      id: brandId<'MembershipId'>(crypto.randomUUID()),
       userId: ownerId,
       householdId: hid,
       role: 'owner',
@@ -140,7 +140,7 @@ export class InMemoryRepository implements Repository {
     role: Membership['role'],
   ): Promise<Membership> {
     const m: Membership = {
-      id: id<'MembershipId'>(crypto.randomUUID()),
+      id: brandId<'MembershipId'>(crypto.randomUUID()),
       userId,
       householdId,
       role,
@@ -211,7 +211,7 @@ export class InMemoryRepository implements Repository {
     }
     const full: PlannedMeal = {
       ...meal,
-      id: id<'PlannedMealId'>(crypto.randomUUID()),
+      id: brandId<'PlannedMealId'>(crypto.randomUUID()),
       householdId,
       version: 1,
       updatedBy: actor,
@@ -252,7 +252,7 @@ export class InMemoryRepository implements Repository {
     for (const meal of meals) {
       const full: PlannedMeal = {
         ...meal,
-        id: id<'PlannedMealId'>(crypto.randomUUID()),
+        id: brandId<'PlannedMealId'>(crypto.randomUUID()),
         householdId,
         version: 1,
         updatedBy: actor,
@@ -294,7 +294,7 @@ export class InMemoryRepository implements Repository {
     createdById: MembershipId,
   ): Promise<{ request: GroceryRequest; event: SystemEvent }> {
     const request: GroceryRequest = {
-      id: id<'GroceryRequestId'>(crypto.randomUUID()),
+      id: brandId<'GroceryRequestId'>(crypto.randomUUID()),
       householdId,
       itemText: input.itemText,
       quantityText: input.quantityText,
@@ -451,7 +451,7 @@ export class InMemoryRepository implements Repository {
     },
   ): Promise<ChatMessage> {
     const m: ChatMessage = {
-      id: id<'ChatMessageId'>(crypto.randomUUID()),
+      id: brandId<'ChatMessageId'>(crypto.randomUUID()),
       householdId,
       senderId: input.senderId,
       kind: input.kind,
@@ -504,7 +504,7 @@ export class InMemoryRepository implements Repository {
   ): Promise<SystemEvent> {
     const e: SystemEvent = {
       ...event,
-      id: id<'SystemEventId'>(crypto.randomUUID()),
+      id: brandId<'SystemEventId'>(crypto.randomUUID()),
       householdId,
       createdAt: this.now(),
     };
@@ -518,7 +518,7 @@ export class InMemoryRepository implements Repository {
   ): Promise<ActionSuggestion> {
     const s: ActionSuggestion = {
       ...input,
-      id: id<'SuggestionId'>(crypto.randomUUID()),
+      id: brandId<'SuggestionId'>(crypto.randomUUID()),
       householdId,
       status: 'pending',
       createdAt: this.now(),
@@ -580,7 +580,7 @@ export class InMemoryRepository implements Repository {
     if (d) this.devices.set(deviceId as string, { ...d, invalidatedAt: this.now() });
   }
   async registerDevice(device: Omit<DeviceRegistration, 'id'>): Promise<DeviceRegistration> {
-    const d: DeviceRegistration = { ...device, id: id<'DeviceId'>(crypto.randomUUID()) };
+    const d: DeviceRegistration = { ...device, id: brandId<'DeviceId'>(crypto.randomUUID()) };
     this.devices.set(d.id as string, d);
     return d;
   }
@@ -598,7 +598,7 @@ export class InMemoryRepository implements Repository {
     },
   ): Promise<GroceryOrder> {
     const o: GroceryOrder = {
-      id: id<'GroceryOrderId'>(crypto.randomUUID()),
+      id: brandId<'GroceryOrderId'>(crypto.randomUUID()),
       householdId,
       placedById,
       providerOrderId: input.providerOrderId,

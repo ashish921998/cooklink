@@ -12,7 +12,7 @@ import {
   fonts,
   space,
   styles,
-} from '../components/ui';
+} from '../components/design-system';
 import { Mascot } from '../components/Mascot';
 import { Text, TextInput } from '../components/Typography';
 

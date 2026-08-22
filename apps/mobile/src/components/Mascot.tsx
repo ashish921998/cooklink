@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AccessibilityInfo, Animated, Easing, Pressable, StyleSheet, View } from 'react-native';
-import { colors, fonts, radius, shadow, space, useSteam } from './ui';
+import { colors, fonts, radius, shadow, space, useSteam } from './design-system';
 import { Text } from './Typography';
 
 /**

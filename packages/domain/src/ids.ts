@@ -22,6 +22,6 @@ export type GroceryOrderId = Brand<string, 'GroceryOrderId'>;
 export type DeviceId = Brand<string, 'DeviceId'>;
 
 /** Cast a raw string (from the DB, URL, or JSON) into a branded id. */
-export function id<B extends string>(value: string): Brand<string, B> {
+export function brandId<B extends string>(value: string): Brand<string, B> {
   return value as Brand<string, B>;
 }

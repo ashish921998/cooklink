@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Authorization, AuthorizationDeniedError, InMemoryRepository, id } from '../index.js';
+import { Authorization, AuthorizationDeniedError, InMemoryRepository, brandId } from '../index.js';
 import { isMediaAccessible } from '../chat-media.js';
 
 /**
@@ -13,13 +13,13 @@ async function twoHouseholds() {
   const auth = new Authorization(repo);
 
   const userA = await repo.createUser({
-    id: id<'UserId'>('u-a'),
+    id: brandId<'UserId'>('u-a'),
     clerkUserId: 'ca',
     phone: '+919111111111',
     displayName: 'A-owner',
   });
   const userB = await repo.createUser({
-    id: id<'UserId'>('u-b'),
+    id: brandId<'UserId'>('u-b'),
     clerkUserId: 'cb',
     phone: '+919122222222',
     displayName: 'B-owner',
@@ -29,7 +29,7 @@ async function twoHouseholds() {
 
   // a cook in A only
   const cookA = await repo.createUser({
-    id: id<'UserId'>('u-cooka'),
+    id: brandId<'UserId'>('u-cooka'),
     clerkUserId: 'cc',
     phone: '+919133333333',
     displayName: 'Cook A',
@@ -156,7 +156,7 @@ test('suggestions are private to their author and household', async () => {
     expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
   });
   // listing pending for a membership in B returns nothing
-  const inB = await repo.listPendingSuggestions(id<'MembershipId'>('nonexistent-b'));
+  const inB = await repo.listPendingSuggestions(brandId<'MembershipId'>('nonexistent-b'));
   assert.equal(inB.length, 0);
   // a cross-household status update is ignored
   await repo.updateSuggestionStatus(hb.household.id, s.id as string, 'dismissed');
@@ -199,7 +199,7 @@ test('media/transcripts are tied to household messages and do not leak', async (
     correctedTranscript: null,
   });
   // A's timeline has no messages and thus no transcript
-  const aTimeline = await repo.getChatTimeline(id<'HouseholdId'>('house-a'), null, 10);
+  const aTimeline = await repo.getChatTimeline(brandId<'HouseholdId'>('house-a'), null, 10);
   assert.equal(aTimeline.length, 0);
   // transcript retrieval is keyed by message id, which lives only in B
   const t = await repo.getTranscript(msg.id);

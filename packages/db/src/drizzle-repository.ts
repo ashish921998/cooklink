@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { and, eq, gte, isNull, lte, or } from 'drizzle-orm';
 import {
-  id,
+  brandId,
   type ActionSuggestion,
   type ChatMessage,
   type ChatMessageId,
@@ -39,6 +39,11 @@ import * as s from './schema.js';
 type Tx = Parameters<Parameters<Database['transaction']>[0]>[0];
 type DbLike = Database | Tx;
 
+/**
+ * The Postgres/Drizzle implementation of the domain `Repository` port.
+ * Maps rows onto branded domain ids on read; the application server's route
+ * modules use this for product matches, orders, and checkout audit rows.
+ */
 export class DrizzleRepository implements Repository {
   constructor(private readonly db: Database) {}
 
@@ -112,8 +117,8 @@ export class DrizzleRepository implements Repository {
 
   async createHousehold(input: Omit<Household, 'id' | 'createdAt' | 'closedAt'>, ownerId: UserId) {
     return this.db.transaction(async (tx) => {
-      const householdId = id<'HouseholdId'>(randomUUID());
-      const membershipId = id<'MembershipId'>(randomUUID());
+      const householdId = brandId<'HouseholdId'>(randomUUID());
+      const membershipId = brandId<'MembershipId'>(randomUUID());
       await tx.insert(s.households).values({ id: householdId, ...input });
       await tx.insert(s.memberships).values({
         id: membershipId,
@@ -148,7 +153,7 @@ export class DrizzleRepository implements Repository {
   }
 
   async addMembership(householdId: HouseholdId, userId: UserId, role: Membership['role']) {
-    const membershipId = id<'MembershipId'>(randomUUID());
+    const membershipId = brandId<'MembershipId'>(randomUUID());
     await this.db.insert(s.memberships).values({
       id: membershipId,
       userId,
@@ -238,12 +243,12 @@ export class DrizzleRepository implements Repository {
     if (existing)
       return this.updatePlannedMeal(
         householdId,
-        id<'PlannedMealId'>(existing.id),
+        brandId<'PlannedMealId'>(existing.id),
         existing.version,
         meal,
         actor,
       );
-    const mealId = id<'PlannedMealId'>(randomUUID());
+    const mealId = brandId<'PlannedMealId'>(randomUUID());
     await this.db
       .insert(s.plannedMeals)
       .values({ id: mealId, householdId, ...meal, version: 1, updatedBy: actor });
@@ -356,7 +361,7 @@ export class DrizzleRepository implements Repository {
     createdById: MembershipId,
   ) {
     return this.db.transaction(async (tx) => {
-      const requestId = id<'GroceryRequestId'>(randomUUID());
+      const requestId = brandId<'GroceryRequestId'>(randomUUID());
       await tx
         .insert(s.groceryRequests)
         .values({ id: requestId, householdId, ...input, createdById });
@@ -560,7 +565,7 @@ export class DrizzleRepository implements Repository {
       clientCreatedAt: string;
     },
   ) {
-    const messageId = id<'ChatMessageId'>(randomUUID());
+    const messageId = brandId<'ChatMessageId'>(randomUUID());
     await this.db.insert(s.chatMessages).values({
       id: messageId,
       householdId,
@@ -632,7 +637,7 @@ export class DrizzleRepository implements Repository {
     householdId: HouseholdId,
     input: Omit<ActionSuggestion, 'id' | 'createdAt' | 'householdId' | 'status'>,
   ) {
-    const suggestionId = id<'SuggestionId'>(randomUUID());
+    const suggestionId = brandId<'SuggestionId'>(randomUUID());
     await this.db.insert(s.actionSuggestions).values({
       id: suggestionId,
       householdId,
@@ -730,7 +735,7 @@ export class DrizzleRepository implements Repository {
   }
 
   async registerDevice(device: Omit<DeviceRegistration, 'id'>) {
-    const deviceId = id<'DeviceId'>(randomUUID());
+    const deviceId = brandId<'DeviceId'>(randomUUID());
     await this.db
       .insert(s.deviceRegistrations)
       .values({
@@ -779,7 +784,7 @@ export class DrizzleRepository implements Repository {
       totalCents: number | null;
     },
   ) {
-    const orderId = id<'GroceryOrderId'>(randomUUID());
+    const orderId = brandId<'GroceryOrderId'>(randomUUID());
     await this.db
       .insert(s.groceryOrders)
       .values({ id: orderId, householdId, placedById, ...input });
@@ -985,7 +990,7 @@ async function insertSystemEvent(
   householdId: HouseholdId,
   event: Omit<SystemEvent, 'id' | 'createdAt' | 'householdId'>,
 ) {
-  const eventId = id<'SystemEventId'>(randomUUID());
+  const eventId = brandId<'SystemEventId'>(randomUUID());
   await db.insert(s.systemEvents).values({ id: eventId, householdId, ...event });
   const [row] = await db
     .select()
@@ -997,13 +1002,13 @@ async function insertSystemEvent(
 }
 
 function user(row: typeof s.users.$inferSelect): User {
-  return { ...row, id: id<'UserId'>(row.id), createdAt: iso(row.createdAt) };
+  return { ...row, id: brandId<'UserId'>(row.id), createdAt: iso(row.createdAt) };
 }
 
 function household(row: typeof s.households.$inferSelect): Household {
   return {
     ...row,
-    id: id<'HouseholdId'>(row.id),
+    id: brandId<'HouseholdId'>(row.id),
     createdAt: iso(row.createdAt),
     closedAt: row.closedAt ? iso(row.closedAt) : null,
   };
@@ -1012,9 +1017,9 @@ function household(row: typeof s.households.$inferSelect): Household {
 function membership(row: typeof s.memberships.$inferSelect): Membership {
   return {
     ...row,
-    id: id<'MembershipId'>(row.id),
-    userId: id<'UserId'>(row.userId),
-    householdId: id<'HouseholdId'>(row.householdId),
+    id: brandId<'MembershipId'>(row.id),
+    userId: brandId<'UserId'>(row.userId),
+    householdId: brandId<'HouseholdId'>(row.householdId),
     joinedAt: iso(row.joinedAt),
     removedAt: row.removedAt ? iso(row.removedAt) : null,
   };
@@ -1023,10 +1028,10 @@ function membership(row: typeof s.memberships.$inferSelect): Membership {
 function plannedMeal(row: typeof s.plannedMeals.$inferSelect): PlannedMeal {
   return {
     ...row,
-    id: id<'PlannedMealId'>(row.id),
-    householdId: id<'HouseholdId'>(row.householdId),
-    recipeId: row.recipeId ? id<'RecipeId'>(row.recipeId) : null,
-    updatedBy: row.updatedBy ? id<'MembershipId'>(row.updatedBy) : null,
+    id: brandId<'PlannedMealId'>(row.id),
+    householdId: brandId<'HouseholdId'>(row.householdId),
+    recipeId: row.recipeId ? brandId<'RecipeId'>(row.recipeId) : null,
+    updatedBy: row.updatedBy ? brandId<'MembershipId'>(row.updatedBy) : null,
     updatedAt: iso(row.updatedAt),
   };
 }
@@ -1034,7 +1039,7 @@ function plannedMeal(row: typeof s.plannedMeals.$inferSelect): PlannedMeal {
 function recipe(row: typeof s.recipes.$inferSelect): Recipe {
   return {
     ...row,
-    id: id<'RecipeId'>(row.id),
+    id: brandId<'RecipeId'>(row.id),
     ingredients: row.ingredients as Recipe['ingredients'],
     mealTypes: row.mealTypes as Recipe['mealTypes'],
   };
@@ -1043,11 +1048,11 @@ function recipe(row: typeof s.recipes.$inferSelect): Recipe {
 function groceryRequest(row: typeof s.groceryRequests.$inferSelect): GroceryRequest {
   return {
     ...row,
-    id: id<'GroceryRequestId'>(row.id),
-    householdId: id<'HouseholdId'>(row.householdId),
-    createdById: id<'MembershipId'>(row.createdById),
+    id: brandId<'GroceryRequestId'>(row.id),
+    householdId: brandId<'HouseholdId'>(row.householdId),
+    createdById: brandId<'MembershipId'>(row.createdById),
     createdAt: iso(row.createdAt),
-    resolvedById: row.resolvedById ? id<'MembershipId'>(row.resolvedById) : null,
+    resolvedById: row.resolvedById ? brandId<'MembershipId'>(row.resolvedById) : null,
     resolvedAt: row.resolvedAt ? iso(row.resolvedAt) : null,
   };
 }
@@ -1055,22 +1060,24 @@ function groceryRequest(row: typeof s.groceryRequests.$inferSelect): GroceryRequ
 function suggestedCartItem(row: typeof s.suggestedCartItems.$inferSelect): SuggestedCartItem {
   return {
     ...row,
-    householdId: id<'HouseholdId'>(row.householdId),
-    groceryRequestId: row.groceryRequestId ? id<'GroceryRequestId'>(row.groceryRequestId) : null,
+    householdId: brandId<'HouseholdId'>(row.householdId),
+    groceryRequestId: row.groceryRequestId
+      ? brandId<'GroceryRequestId'>(row.groceryRequestId)
+      : null,
     affectedMeals: row.affectedMeals as SuggestedCartItem['affectedMeals'],
   };
 }
 
 function pantryLedgerEntry(row: typeof s.pantryLedger.$inferSelect): PantryLedgerEntry {
-  return { ...row, householdId: id<'HouseholdId'>(row.householdId), at: iso(row.at) };
+  return { ...row, householdId: brandId<'HouseholdId'>(row.householdId), at: iso(row.at) };
 }
 
 function chatMessage(row: typeof s.chatMessages.$inferSelect): ChatMessage {
   return {
     ...row,
-    id: id<'ChatMessageId'>(row.id),
-    householdId: id<'HouseholdId'>(row.householdId),
-    senderId: id<'MembershipId'>(row.senderId),
+    id: brandId<'ChatMessageId'>(row.id),
+    householdId: brandId<'HouseholdId'>(row.householdId),
+    senderId: brandId<'MembershipId'>(row.senderId),
     clientCreatedAt: iso(row.clientCreatedAt),
     serverCreatedAt: iso(row.serverCreatedAt),
     editedAt: row.editedAt ? iso(row.editedAt) : null,
@@ -1079,16 +1086,16 @@ function chatMessage(row: typeof s.chatMessages.$inferSelect): ChatMessage {
 }
 
 function voiceTranscript(row: typeof s.voiceTranscripts.$inferSelect): VoiceTranscript {
-  return { ...row, messageId: id<'ChatMessageId'>(row.messageId) };
+  return { ...row, messageId: brandId<'ChatMessageId'>(row.messageId) };
 }
 
 function systemEvent(row: typeof s.systemEvents.$inferSelect): SystemEvent {
   return {
     ...row,
-    id: id<'SystemEventId'>(row.id),
-    householdId: id<'HouseholdId'>(row.householdId),
+    id: brandId<'SystemEventId'>(row.id),
+    householdId: brandId<'HouseholdId'>(row.householdId),
     type: row.type as SystemEventType,
-    actorId: row.actorId ? id<'MembershipId'>(row.actorId) : null,
+    actorId: row.actorId ? brandId<'MembershipId'>(row.actorId) : null,
     createdAt: iso(row.createdAt),
   };
 }
@@ -1096,10 +1103,10 @@ function systemEvent(row: typeof s.systemEvents.$inferSelect): SystemEvent {
 function actionSuggestion(row: typeof s.actionSuggestions.$inferSelect): ActionSuggestion {
   return {
     ...row,
-    id: id<'SuggestionId'>(row.id),
-    householdId: id<'HouseholdId'>(row.householdId),
-    authorId: id<'MembershipId'>(row.authorId),
-    sourceMessageId: row.sourceMessageId ? id<'ChatMessageId'>(row.sourceMessageId) : null,
+    id: brandId<'SuggestionId'>(row.id),
+    householdId: brandId<'HouseholdId'>(row.householdId),
+    authorId: brandId<'MembershipId'>(row.authorId),
+    sourceMessageId: row.sourceMessageId ? brandId<'ChatMessageId'>(row.sourceMessageId) : null,
     intent: row.intent as ActionSuggestion['intent'],
     expiresAt: iso(row.expiresAt),
     createdAt: iso(row.createdAt),
@@ -1109,17 +1116,19 @@ function actionSuggestion(row: typeof s.actionSuggestions.$inferSelect): ActionS
 function memberState(row: typeof s.householdMemberState.$inferSelect): HouseholdMemberState {
   return {
     ...row,
-    userId: id<'UserId'>(row.userId),
-    householdId: id<'HouseholdId'>(row.householdId),
-    lastReadMessageId: row.lastReadMessageId ? id<'ChatMessageId'>(row.lastReadMessageId) : null,
+    userId: brandId<'UserId'>(row.userId),
+    householdId: brandId<'HouseholdId'>(row.householdId),
+    lastReadMessageId: row.lastReadMessageId
+      ? brandId<'ChatMessageId'>(row.lastReadMessageId)
+      : null,
   };
 }
 
 function deviceRegistration(row: typeof s.deviceRegistrations.$inferSelect): DeviceRegistration {
   return {
     ...row,
-    id: id<'DeviceId'>(row.id),
-    userId: id<'UserId'>(row.userId),
+    id: brandId<'DeviceId'>(row.id),
+    userId: brandId<'UserId'>(row.userId),
     invalidatedAt: row.invalidatedAt ? iso(row.invalidatedAt) : null,
   };
 }
@@ -1127,9 +1136,9 @@ function deviceRegistration(row: typeof s.deviceRegistrations.$inferSelect): Dev
 function groceryOrder(row: typeof s.groceryOrders.$inferSelect): GroceryOrder {
   return {
     ...row,
-    id: id<'GroceryOrderId'>(row.id),
-    householdId: id<'HouseholdId'>(row.householdId),
-    placedById: id<'MembershipId'>(row.placedById),
+    id: brandId<'GroceryOrderId'>(row.id),
+    householdId: brandId<'HouseholdId'>(row.householdId),
+    placedById: brandId<'MembershipId'>(row.placedById),
     createdAt: iso(row.createdAt),
   };
 }
@@ -1137,13 +1146,13 @@ function groceryOrder(row: typeof s.groceryOrders.$inferSelect): GroceryOrder {
 function productMatch(row: typeof s.productMatches.$inferSelect): ProductMatch {
   return {
     id: row.id,
-    householdId: id<'HouseholdId'>(row.householdId),
+    householdId: brandId<'HouseholdId'>(row.householdId),
     cartItemId: row.cartItemId,
     productId: row.productId,
     addressId: row.addressId,
     quantity: row.quantity,
     product: row.product as ProductMatch['product'],
-    selectedById: id<'MembershipId'>(row.selectedById),
+    selectedById: brandId<'MembershipId'>(row.selectedById),
     selectedAt: iso(row.selectedAt),
   };
 }
@@ -1151,8 +1160,8 @@ function productMatch(row: typeof s.productMatches.$inferSelect): ProductMatch {
 function idempotencyKey(row: typeof s.idempotencyKeys.$inferSelect): IdempotencyKeyRecord {
   return {
     key: row.key,
-    membershipId: id<'MembershipId'>(row.membershipId),
-    householdId: id<'HouseholdId'>(row.householdId),
+    membershipId: brandId<'MembershipId'>(row.membershipId),
+    householdId: brandId<'HouseholdId'>(row.householdId),
     status: row.status as IdempotencyKeyRecord['status'],
     result: row.result,
     createdAt: iso(row.createdAt),
@@ -1163,8 +1172,8 @@ function checkoutAudit(row: typeof s.checkoutAudit.$inferSelect): CheckoutAuditR
   return {
     id: row.id,
     idempotencyKey: row.idempotencyKey,
-    membershipId: id<'MembershipId'>(row.membershipId),
-    householdId: id<'HouseholdId'>(row.householdId),
+    membershipId: brandId<'MembershipId'>(row.membershipId),
+    householdId: brandId<'HouseholdId'>(row.householdId),
     cartTotalCents: row.cartTotalCents ?? null,
     paymentMethod: row.paymentMethod ?? null,
     result: row.result,

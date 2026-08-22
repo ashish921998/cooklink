@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EDIT_WINDOW_MS, canEditOrDeleteMessage } from '../chat-lifecycle.js';
-import type { ChatMessage } from '../types.js';
+import type { ChatMessage } from '../domain-types.js';
 
 const BASE = '2026-07-01T10:00:00.000Z';
 

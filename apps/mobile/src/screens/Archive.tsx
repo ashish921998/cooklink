@@ -12,7 +12,7 @@ import {
   fonts,
   radius,
   space,
-} from '../components/ui';
+} from '../components/design-system';
 import { Text, TextInput } from '../components/Typography';
 
 type SearchFilter = 'all' | PlannedMeal['mealType'];

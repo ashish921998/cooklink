@@ -14,7 +14,7 @@ import {
   fonts,
   radius,
   space,
-} from '../components/ui';
+} from '../components/design-system';
 import { Text, TextInput } from '../components/Typography';
 
 type BookFilter = 'all' | 'with-recipe' | 'to-cook' | 'baking';

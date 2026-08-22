@@ -1,5 +1,5 @@
-import type { DietStyle, ISODate, MealStyle, MealType, PlannedMeal } from './types.js';
-import { MEAL_TYPES, mostRestrictive } from './types.js';
+import type { DietStyle, ISODate, MealStyle, MealType, PlannedMeal } from './domain-types.js';
+import { MEAL_TYPES, mostRestrictiveDietStyle } from './domain-types.js';
 import { addDays } from './cart.js';
 
 /**
@@ -160,6 +160,6 @@ export function regenerateKeepsEdited(
 
 /** Apply most-restrictive diet guardrail to a candidate pool (issue 04, AC#2). */
 export function restrictPool(pool: string[], styles: DietStyle[]): string[] {
-  void mostRestrictive(styles); // guardrail marker; real filtering happens by recipe dietStyle
+  void mostRestrictiveDietStyle(styles); // guardrail marker; real filtering happens by recipe dietStyle
   return pool;
 }

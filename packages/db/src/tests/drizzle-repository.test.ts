@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createDatabase, DrizzleRepository } from '../index.js';
-import { id } from '@cooklink/domain';
+import { brandId } from '@cooklink/domain';
 
 const databaseUrl = process.env.DATABASE_URL;
 
@@ -12,13 +12,13 @@ test(
     const repo = new DrizzleRepository(createDatabase(databaseUrl));
     const suffix = crypto.randomUUID();
     const userA = await repo.createUser({
-      id: id<'UserId'>(crypto.randomUUID()),
+      id: brandId<'UserId'>(crypto.randomUUID()),
       clerkUserId: `repo-a-${suffix}`,
       phone: '+919100000001',
       displayName: 'Repo A',
     });
     const userB = await repo.createUser({
-      id: id<'UserId'>(crypto.randomUUID()),
+      id: brandId<'UserId'>(crypto.randomUUID()),
       clerkUserId: `repo-b-${suffix}`,
       phone: '+919100000002',
       displayName: 'Repo B',
@@ -47,7 +47,7 @@ test(
     const repo = new DrizzleRepository(createDatabase(databaseUrl));
     const suffix = crypto.randomUUID();
     const user = await repo.createUser({
-      id: id<'UserId'>(crypto.randomUUID()),
+      id: brandId<'UserId'>(crypto.randomUUID()),
       clerkUserId: `repo-tx-${suffix}`,
       phone: '+919100000003',
       displayName: 'Repo Tx',

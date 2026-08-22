@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { id } from '@cooklink/domain';
+import { brandId } from '@cooklink/domain';
 import { createStubProvider } from '../provider-stub.js';
 
 /**
@@ -11,7 +11,7 @@ import { createStubProvider } from '../provider-stub.js';
  * alternatives for unavailable products (AC#5).
  */
 
-const USER = id<'UserId'>('u-stub-1');
+const USER = brandId<'UserId'>('u-stub-1');
 
 async function connect(provider: ReturnType<typeof createStubProvider>) {
   const start = await provider.startOAuth({

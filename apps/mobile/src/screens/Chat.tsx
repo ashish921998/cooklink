@@ -33,7 +33,7 @@ import {
   shadow,
   space,
   styles as ui,
-} from '../components/ui';
+} from '../components/design-system';
 import { Text, TextInput } from '../components/Typography';
 import { Mascot } from '../components/Mascot';
 import {

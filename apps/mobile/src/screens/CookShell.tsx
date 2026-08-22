@@ -17,7 +17,7 @@ import {
   styles,
   type TabKey,
   type TabSpec,
-} from '../components/ui';
+} from '../components/design-system';
 import { Mascot, MascotState } from '../components/Mascot';
 import { MealPlanScreen } from './MealPlan';
 import { GroceriesScreen } from './Groceries';

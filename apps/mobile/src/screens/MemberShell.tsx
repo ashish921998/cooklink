@@ -30,7 +30,7 @@ import {
   styles,
   type TabKey,
   type TabSpec,
-} from '../components/ui';
+} from '../components/design-system';
 import { Text, TextInput } from '../components/Typography';
 import { MealPlanScreen } from './MealPlan';
 import { GroceriesScreen } from './Groceries';

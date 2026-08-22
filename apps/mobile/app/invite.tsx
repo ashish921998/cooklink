@@ -3,7 +3,7 @@ import { useUser } from '@clerk/expo';
 import { useCallback } from 'react';
 import { AcceptInvite } from '../src/screens/AcceptInvite';
 import { devAuthEnabled } from '../src/lib/api';
-import { Loading } from '../src/components/ui';
+import { Loading } from '../src/components/design-system';
 
 /**
  * The deep-link entry for invite acceptance (issue 03). A WhatsApp message

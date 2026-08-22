@@ -3,7 +3,8 @@ import test from 'node:test';
 import { eq } from 'drizzle-orm';
 import { createDatabase, groceryRequests, memberships } from '@cooklink/db';
 import { createStubProvider } from '../provider-stub.js';
-import { createApp, createInMemoryConfirmationStore } from '../app.js';
+import { createApp } from '../app.js';
+import { createInMemoryConfirmationStore } from '../checkout-confirmation-store.js';
 
 /**
  * Issue 11 — complete confirmed checkout and order recovery, end to end

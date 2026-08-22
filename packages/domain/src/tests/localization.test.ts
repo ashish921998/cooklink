@@ -18,8 +18,8 @@ import {
   memberActionLabels,
   similarityChoiceLabels,
 } from '../grocery-request.js';
-import type { SystemEvent } from '../types.js';
-import { id } from '../ids.js';
+import type { SystemEvent } from '../domain-types.js';
+import { brandId } from '../ids.js';
 
 /**
  * Issue 13, AC#3 — localization coverage.
@@ -33,8 +33,8 @@ import { id } from '../ids.js';
 
 function makeEvent(type: SystemEvent['type'], payload: Record<string, unknown>): SystemEvent {
   return {
-    id: id<'SystemEventId'>('evt-test'),
-    householdId: id<'HouseholdId'>('h-test'),
+    id: brandId<'SystemEventId'>('evt-test'),
+    householdId: brandId<'HouseholdId'>('h-test'),
     type,
     actorId: null,
     entityType: 'test',

@@ -1,4 +1,4 @@
-import type { Recipe, RecipeIngredient } from './types.js';
+import type { Recipe, RecipeIngredient } from './domain-types.js';
 
 /**
  * Scales a recipe's dependable ingredient quantities deterministically from

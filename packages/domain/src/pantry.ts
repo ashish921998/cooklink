@@ -1,4 +1,4 @@
-import type { PantryConfidence, PantryLedgerEntry } from './types.js';
+import type { PantryConfidence, PantryLedgerEntry } from './domain-types.js';
 
 /**
  * Estimated Pantry math (issue 05).

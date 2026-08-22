@@ -19,7 +19,7 @@ import {
   shadow,
   space,
   styles,
-} from '../src/components/ui';
+} from '../src/components/design-system';
 import { BrandLogo } from '../src/components/BrandLogo';
 import { Mascot, MascotState } from '../src/components/Mascot';
 import { MemberShell } from '../src/screens/MemberShell';

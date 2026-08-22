@@ -1,4 +1,4 @@
-import type { SystemEventType, ISODateTime } from './types.js';
+import type { SystemEventType, ISODateTime } from './domain-types.js';
 import type { HouseholdId, MembershipId } from './ids.js';
 import type { ProviderCartReview, ProviderOrder } from './provider.js';
 

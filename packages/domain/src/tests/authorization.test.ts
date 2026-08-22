@@ -4,7 +4,7 @@ import {
   Authorization,
   AuthorizationDeniedError,
   InMemoryRepository,
-  id,
+  brandId,
   capabilities,
 } from '../index.js';
 
@@ -12,7 +12,7 @@ async function setup() {
   const repo = new InMemoryRepository();
   const auth = new Authorization(repo);
   const user = await repo.createUser({
-    id: id<'UserId'>('u-owner'),
+    id: brandId<'UserId'>('u-owner'),
     clerkUserId: 'clerk-1',
     phone: '+919999999999',
     displayName: 'Owner',
@@ -42,7 +42,7 @@ test('authorize succeeds for an active owner', async () => {
 
 test('authorize denies a non-member', async () => {
   const { auth, household } = await setup();
-  const stranger = id<'UserId'>('u-stranger');
+  const stranger = brandId<'UserId'>('u-stranger');
   await assert.rejects(
     () => auth.authorize(stranger, household.id),
     (e: unknown) => e instanceof AuthorizationDeniedError,
@@ -52,7 +52,7 @@ test('authorize denies a non-member', async () => {
 test('authorize denies a removed member immediately (access changed)', async () => {
   const { repo, auth, household } = await setup();
   const cook = await repo.createUser({
-    id: id<'UserId'>('u-cook'),
+    id: brandId<'UserId'>('u-cook'),
     clerkUserId: 'c-2',
     phone: '+918888888888',
     displayName: 'Cook',
@@ -74,7 +74,7 @@ test('authorize denies when the household is closed', async () => {
 test('capability matrix: cook can create requests but cannot approve or checkout', async () => {
   const { repo, auth, user, household } = await setup();
   const cookUser = await repo.createUser({
-    id: id<'UserId'>('u-cook2'),
+    id: brandId<'UserId'>('u-cook2'),
     clerkUserId: 'c-3',
     phone: '+917777777777',
     displayName: 'Cook',
@@ -98,7 +98,7 @@ test('capability matrix: cook can create requests but cannot approve or checkout
 test('authorizeCapability enforces a capability and denies otherwise', async () => {
   const { repo, auth, household } = await setup();
   const cookUser = await repo.createUser({
-    id: id<'UserId'>('u-cook3'),
+    id: brandId<'UserId'>('u-cook3'),
     clerkUserId: 'c-4',
     phone: '+916666666666',
     displayName: 'Cook',

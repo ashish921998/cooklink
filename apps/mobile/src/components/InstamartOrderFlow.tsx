@@ -26,7 +26,7 @@ import {
   shadow,
   space,
   styles,
-} from './ui';
+} from './design-system';
 import { Text } from './Typography';
 
 const SELECTED_ACCESSIBILITY_STATE = { selected: true } as const;

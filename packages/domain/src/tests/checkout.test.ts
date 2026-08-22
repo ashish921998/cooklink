@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { id } from '../ids.js';
+import { brandId } from '../ids.js';
 import {
   decideCheckout,
   paymentSelection,
@@ -17,8 +17,8 @@ import {
 } from '../checkout.js';
 import type { ProviderCartReview, ProviderOrder } from '../provider.js';
 
-const HOUSEHOLD = id<'HouseholdId'>('h-1');
-const MEMBER = id<'MembershipId'>('m-1');
+const HOUSEHOLD = brandId<'HouseholdId'>('h-1');
+const MEMBER = brandId<'MembershipId'>('m-1');
 
 function makeReview(overrides: Partial<ProviderCartReview> = {}): ProviderCartReview {
   return {
@@ -208,7 +208,7 @@ test('confirmationMatches: membership mismatch denies (AC#2 role binding)', () =
     paymentMethodId: 'pm-cod',
     now,
   });
-  const other = id<'MembershipId'>('m-2');
+  const other = brandId<'MembershipId'>('m-2');
   const result = confirmationMatches(
     conf,
     { membershipId: other, review: makeReview(), paymentMethodId: 'pm-cod' },

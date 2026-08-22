@@ -1,5 +1,5 @@
 import type { HouseholdId, MembershipId, UserId } from './ids.js';
-import type { SuggestedCartItem, ISODateTime } from './types.js';
+import type { SuggestedCartItem, ISODateTime } from './domain-types.js';
 
 /**
  * The Instamart (Swiggy MCP) provider port for issue 10.

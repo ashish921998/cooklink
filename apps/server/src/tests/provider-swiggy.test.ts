@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { id } from '@cooklink/domain';
+import { brandId } from '@cooklink/domain';
 import {
   createSwiggyProvider,
   type StoredSwiggyToken,
   type SwiggyTokenStore,
 } from '../provider-swiggy.js';
 
-const USER = id<'UserId'>('u-swiggy-live-test');
+const USER = brandId<'UserId'>('u-swiggy-live-test');
 
 function createMemoryTokenStore(): SwiggyTokenStore {
   const tokens = new Map<string, StoredSwiggyToken>();
@@ -240,7 +240,7 @@ test('real provider rejects an OAuth callback with the wrong member', async () =
   await assert.rejects(
     () =>
       provider.completeOAuth({
-        memberUserId: id<'UserId'>('different-user'),
+        memberUserId: brandId<'UserId'>('different-user'),
         code: 'oauth-code',
         state: started.state,
       }),

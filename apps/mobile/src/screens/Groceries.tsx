@@ -20,7 +20,7 @@ import {
   shadow,
   space,
   styles,
-} from '../components/ui';
+} from '../components/design-system';
 import { Text } from '../components/Typography';
 import { InstamartOrderFlow } from '../components/InstamartOrderFlow';
 

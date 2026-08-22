@@ -9,7 +9,7 @@ import type {
   PlannedMeal,
   Recipe,
   SuggestedCartItem,
-} from './types.js';
+} from './domain-types.js';
 import type { HouseholdId } from './ids.js';
 import { type NetQuantity, classifyConfidence, emptyNeed, netAvailable } from './pantry.js';
 import { dependableIngredients } from './recipes.js';

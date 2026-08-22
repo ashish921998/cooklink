@@ -9,7 +9,7 @@ import type {
   NotificationLevel,
   SystemEvent,
   SystemEventType,
-} from './types.js';
+} from './domain-types.js';
 import {
   buildPreview,
   collapseKey,

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { id } from '../ids.js';
+import { brandId } from '../ids.js';
 import type {
   ChatMessage,
   DeviceRegistration,
@@ -8,7 +8,7 @@ import type {
   HouseholdMemberState,
   Membership,
   SystemEvent,
-} from '../types.js';
+} from '../domain-types.js';
 import {
   effectiveLevel,
   resolveRecipientsForEvent,
@@ -23,13 +23,13 @@ import {
 } from '../push-dispatch.js';
 import { collapseKey } from '../notifications.js';
 
-const householdId = id<'HouseholdId'>('h1');
-const cookUserId = id<'UserId'>('u-cook');
-const memberUserId = id<'UserId'>('u-member');
-const ownerUserId = id<'UserId'>('u-owner');
-const cookMembershipId = id<'MembershipId'>('m-cook');
-const memberMembershipId = id<'MembershipId'>('m-member');
-const ownerMembershipId = id<'MembershipId'>('m-owner');
+const householdId = brandId<'HouseholdId'>('h1');
+const cookUserId = brandId<'UserId'>('u-cook');
+const memberUserId = brandId<'UserId'>('u-member');
+const ownerUserId = brandId<'UserId'>('u-owner');
+const cookMembershipId = brandId<'MembershipId'>('m-cook');
+const memberMembershipId = brandId<'MembershipId'>('m-member');
+const ownerMembershipId = brandId<'MembershipId'>('m-owner');
 
 function makeHousehold(): Household {
   return {
@@ -54,8 +54,8 @@ function makeMembership(
   notificationDefault: 'all' | 'important' | 'muted',
 ): Membership {
   return {
-    id: id<'MembershipId'>(membershipId),
-    userId: id<'UserId'>(userId),
+    id: brandId<'MembershipId'>(membershipId),
+    userId: brandId<'UserId'>(userId),
     householdId,
     role,
     status: 'active',
@@ -71,8 +71,8 @@ function makeDevice(
   opts: { hidePreviews?: boolean; invalidatedAt?: string | null } = {},
 ): DeviceRegistration {
   return {
-    id: id<'DeviceId'>(`dev-${token}`),
-    userId: id<'UserId'>(userId),
+    id: brandId<'DeviceId'>(`dev-${token}`),
+    userId: brandId<'UserId'>(userId),
     pushToken: token,
     platform: 'ios',
     hidePreviews: opts.hidePreviews ?? false,
@@ -85,7 +85,7 @@ function makeMemberState(
   override: 'all' | 'important' | 'muted' | null,
 ): HouseholdMemberState {
   return {
-    userId: id<'UserId'>(userId),
+    userId: brandId<'UserId'>(userId),
     householdId,
     lastReadMessageId: null,
     notificationOverride: override,
@@ -95,7 +95,7 @@ function makeMemberState(
 function makeBaseInput(actorMembershipId: string | null): ResolveRecipientsInput {
   return {
     householdId,
-    actorMembershipId: actorMembershipId ? id<'MembershipId'>(actorMembershipId) : null,
+    actorMembershipId: actorMembershipId ? brandId<'MembershipId'>(actorMembershipId) : null,
     members: [
       makeMembership(ownerMembershipId, ownerUserId, 'owner', 'all'),
       makeMembership(memberMembershipId, memberUserId, 'member', 'all'),
@@ -112,10 +112,10 @@ function makeBaseInput(actorMembershipId: string | null): ResolveRecipientsInput
 
 function makeEvent(type: SystemEvent['type'], actorId: string | null): SystemEvent {
   return {
-    id: id<'SystemEventId'>('e1'),
+    id: brandId<'SystemEventId'>('e1'),
     householdId,
     type,
-    actorId: actorId ? id<'MembershipId'>(actorId) : null,
+    actorId: actorId ? brandId<'MembershipId'>(actorId) : null,
     entityType: 'test',
     entityId: 'ent1',
     payload: {},
@@ -125,9 +125,9 @@ function makeEvent(type: SystemEvent['type'], actorId: string | null): SystemEve
 
 function makeMessage(senderId: string, body: string): ChatMessage {
   return {
-    id: id<'ChatMessageId'>('msg1'),
+    id: brandId<'ChatMessageId'>('msg1'),
     householdId,
-    senderId: id<'MembershipId'>(senderId),
+    senderId: brandId<'MembershipId'>(senderId),
     kind: 'text',
     body,
     caption: null,
@@ -423,14 +423,14 @@ test('countUnread: all messages unread when no lastRead', () => {
 
 test('countUnread: counts messages after lastRead', () => {
   const messages = [
-    { ...makeMessage(cookMembershipId, 'a'), id: id<'ChatMessageId'>('m1') },
-    { ...makeMessage(cookMembershipId, 'b'), id: id<'ChatMessageId'>('m2') },
-    { ...makeMessage(cookMembershipId, 'c'), id: id<'ChatMessageId'>('m3') },
+    { ...makeMessage(cookMembershipId, 'a'), id: brandId<'ChatMessageId'>('m1') },
+    { ...makeMessage(cookMembershipId, 'b'), id: brandId<'ChatMessageId'>('m2') },
+    { ...makeMessage(cookMembershipId, 'c'), id: brandId<'ChatMessageId'>('m3') },
   ];
   const state: HouseholdMemberState = {
     userId: memberUserId,
     householdId,
-    lastReadMessageId: id<'ChatMessageId'>('m1'),
+    lastReadMessageId: brandId<'ChatMessageId'>('m1'),
     notificationOverride: null,
   };
   assert.equal(countUnread(messages, state), 2);
@@ -438,18 +438,18 @@ test('countUnread: counts messages after lastRead', () => {
 
 test('countUnread: deleted messages are not counted', () => {
   const messages = [
-    { ...makeMessage(cookMembershipId, 'a'), id: id<'ChatMessageId'>('m1') },
+    { ...makeMessage(cookMembershipId, 'a'), id: brandId<'ChatMessageId'>('m1') },
     {
       ...makeMessage(cookMembershipId, 'b'),
-      id: id<'ChatMessageId'>('m2'),
+      id: brandId<'ChatMessageId'>('m2'),
       deletedAt: '2025-01-02',
     },
-    { ...makeMessage(cookMembershipId, 'c'), id: id<'ChatMessageId'>('m3') },
+    { ...makeMessage(cookMembershipId, 'c'), id: brandId<'ChatMessageId'>('m3') },
   ];
   const state: HouseholdMemberState = {
     userId: memberUserId,
     householdId,
-    lastReadMessageId: id<'ChatMessageId'>('m1'),
+    lastReadMessageId: brandId<'ChatMessageId'>('m1'),
     notificationOverride: null,
   };
   assert.equal(countUnread(messages, state), 1);
@@ -457,13 +457,13 @@ test('countUnread: deleted messages are not counted', () => {
 
 test('countUnread: lastRead not in window means all are unread', () => {
   const messages = [
-    { ...makeMessage(cookMembershipId, 'a'), id: id<'ChatMessageId'>('m1') },
-    { ...makeMessage(cookMembershipId, 'b'), id: id<'ChatMessageId'>('m2') },
+    { ...makeMessage(cookMembershipId, 'a'), id: brandId<'ChatMessageId'>('m1') },
+    { ...makeMessage(cookMembershipId, 'b'), id: brandId<'ChatMessageId'>('m2') },
   ];
   const state: HouseholdMemberState = {
     userId: memberUserId,
     householdId,
-    lastReadMessageId: id<'ChatMessageId'>('nonexistent'),
+    lastReadMessageId: brandId<'ChatMessageId'>('nonexistent'),
     notificationOverride: null,
   };
   assert.equal(countUnread(messages, state), 2);

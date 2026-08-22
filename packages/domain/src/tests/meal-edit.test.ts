@@ -8,9 +8,9 @@ import {
   rankSearchCandidates,
   type MealEditRequest,
 } from '../meal-edit.js';
-import { id } from '../ids.js';
+import { brandId } from '../ids.js';
 import type { MembershipId } from '../ids.js';
-import type { DietStyle, PlannedMeal, Recipe } from '../types.js';
+import type { DietStyle, PlannedMeal, Recipe } from '../domain-types.js';
 
 const TODAY = '2026-01-10';
 const ACTOR = 'm-1' as MembershipId;
@@ -19,7 +19,7 @@ function makeMeal(
   overrides: Partial<PlannedMeal> & { date: string; mealType: PlannedMeal['mealType'] },
 ): PlannedMeal {
   return {
-    id: id<'PlannedMealId'>('m-' + overrides.date + overrides.mealType),
+    id: brandId<'PlannedMealId'>('m-' + overrides.date + overrides.mealType),
     householdId: 'h' as never,
     recipeId: null,
     name: 'Plain Meal',

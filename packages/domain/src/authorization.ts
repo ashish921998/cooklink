@@ -2,7 +2,7 @@ import { AuthorizationDeniedError, type Capability } from './errors.js';
 import type { HouseholdId, MembershipId, UserId } from './ids.js';
 import type { HouseholdRole } from './roles.js';
 import { can } from './roles.js';
-import type { Household, Membership, NotificationLevel } from './types.js';
+import type { Household, Membership, NotificationLevel } from './domain-types.js';
 
 /**
  * An authorized principal: the result of proving that a user is an ACTIVE
