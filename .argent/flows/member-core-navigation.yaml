@@ -1,0 +1,25 @@
+steps:
+  - echo: Restart Cooklink in design preview; expect the member Today screen.
+  - launch: com.cooklink.app
+  - await: { visible: { text: "Today's meals" }, timeout: 30000 }
+  - await: { idle: true, timeout: 9000 }
+  - echo: On Today; open Household Chat and expect the Chat screen.
+  - tap: { text: Household Chat }
+  - await: { visible: { text: Message the household }, timeout: 15000 }
+  - await: { idle: true, timeout: 9000 }
+  - echo: On Chat; return to Today.
+  - tap: { text: Back }
+  - await: { visible: { text: "Today's meals" }, timeout: 10000 }
+  - await: { idle: true, timeout: 9000 }
+  - echo: On Today; open Meal Plan and expect the weekly plan.
+  - tap: { text: Meal Plan }
+  - await: { visible: { text: 'Seven days, one clear plan.' }, timeout: 10000 }
+  - await: { idle: true, timeout: 9000 }
+  - echo: On Meal Plan; open Groceries and expect the grocery review surface.
+  - tap: { text: Groceries }
+  - await: { visible: { text: Review first. Order second. }, timeout: 10000 }
+  - await: { idle: true, timeout: 9000 }
+  - echo: On Groceries; return to Today and expect today's meals.
+  - tap: { text: Today }
+  - await: { visible: { text: "Today's meals" }, timeout: 10000 }
+  - await: { idle: true, timeout: 9000 }

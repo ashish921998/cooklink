@@ -1,0 +1,8 @@
+appId: com.cooklink.app
+---
+- launchApp:
+    clearState: false
+- tapOn: 'Household Chat'
+- assertVisible: 'Household chat'
+- waitForAnimationToEnd
+- takeScreenshot: 'artifacts/store-screenshots/raw/05-household-chat'

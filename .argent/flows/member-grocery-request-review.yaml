@@ -1,0 +1,15 @@
+steps:
+  - echo: Restart Cooklink in design preview; expect the member Today screen.
+  - launch: com.cooklink.app
+  - await: { visible: { text: "Today's meals" }, timeout: 30000 }
+  - await: { idle: true, timeout: 9000 }
+  - echo: On Today; open Groceries and expect the grocery review surface.
+  - tap: { text: Groceries }
+  - await: { visible: { text: Review first. Order second. }, timeout: 10000 }
+  - await: { idle: true, timeout: 9000 }
+  - await: { visible: { text: Approve Tomatoes }, timeout: 10000 }
+  - echo: A Tomatoes request needs review; approve it and expect the request action
+      to disappear.
+  - tap: { text: Approve Tomatoes }
+  - await: { hidden: { text: Approve Tomatoes }, timeout: 10000 }
+  - await: { visible: { text: Nothing waiting }, timeout: 10000 }
