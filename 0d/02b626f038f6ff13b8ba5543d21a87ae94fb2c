@@ -1,0 +1,188 @@
+apps/mobile/src/components/InstamartOrderFlow.tsx
+  s_17f9ca4f7cdcbf::t_4546211042ab31 29
+apps/server/src/checkout-confirmation-store.ts
+  s_17f9ca4f7cdcbf::t_78aca9c05c85e7 1-39
+packages/domain/src/meal-plan.ts
+  s_17f9ca4f7cdcbf::t_fabb332d582fbe 1-2
+  s_17f9ca4f7cdcbf::t_052b811b18934f 163
+packages/domain/src/tests/chat-timeline.test.ts
+  s_17f9ca4f7cdcbf::t_23556e4c14deb4 3-4,16
+packages/domain/src/push-dispatch.ts
+  s_17f9ca4f7cdcbf::t_a42047bfec33a9 12
+packages/domain/src/tests/chat-media.test.ts
+  s_17f9ca4f7cdcbf::t_bc13cbf093720c 3,15,158,168,179,190,203,214
+packages/domain/src/repository.ts
+  s_17f9ca4f7cdcbf::t_e3be024415a6a9 33
+packages/domain/src/ids.ts
+  s_17f9ca4f7cdcbf::t_93bfa4bc885154 25
+packages/domain/src/tests/meal-edit.test.ts
+  s_17f9ca4f7cdcbf::t_ba7a0d2782a94f 11,13,22
+apps/mobile/src/screens/AcceptInvite.tsx
+  s_17f9ca4f7cdcbf::t_e39e84e76c0d1d 15
+packages/domain/src/cart.ts
+  s_17f9ca4f7cdcbf::t_1ff5f357f2c452 12
+apps/server/src/routes/grocery-cart.routes.ts
+  s_17f9ca4f7cdcbf::t_b0bc42cb926223 1-26,28-158
+  s_17f9ca4f7cdcbf::t_bab8f639be11c8 27
+packages/domain/src/authorization.ts
+  s_17f9ca4f7cdcbf::t_78091053a5a744 5
+apps/server/src/app.ts
+  s_17f9ca4f7cdcbf::t_5e1fe9e9ed65cc 36,152
+  s_17f9ca4f7cdcbf::t_db1279b56e58d6 20
+  s_17f9ca4f7cdcbf::t_8d25413f226923 1-12,23,26,31-35,37-46,104-116,144-151,153-154,156-164,168-172,174
+packages/domain/src/pantry.ts
+  s_17f9ca4f7cdcbf::t_ba071e5ecb39cc 1
+packages/domain/src/tests/cart.test.ts
+  s_17f9ca4f7cdcbf::t_f4108d0cc5747f 4
+apps/mobile/src/screens/CookShell.tsx
+  s_17f9ca4f7cdcbf::t_d39ae69871b236 20
+packages/domain/src/tests/cart-integration.test.ts
+  s_17f9ca4f7cdcbf::t_b46503f3adfb34 5,10,40,80,103,192-193,261,304,351,396,443,485,629
+  s_17f9ca4f7cdcbf::t_af070d49b22006 194
+apps/mobile/app/index.tsx
+  s_17f9ca4f7cdcbf::t_db951acac24beb 22
+apps/server/src/routes/chat-suggestions.routes.ts
+  s_17f9ca4f7cdcbf::t_44055a3aa87cc7 35
+  s_17f9ca4f7cdcbf::t_db1279b56e58d6 32
+  s_17f9ca4f7cdcbf::t_34108dfc16c739 1-31,33-34,36-348
+packages/domain/src/tests/recovery-scenarios.test.ts
+  s_17f9ca4f7cdcbf::t_8e1ab8af4499e2 6,38,125-126,233,239,268,274,307,327,350
+packages/domain/src/tests/provider.test.ts
+  s_17f9ca4f7cdcbf::t_c12f06f93c82e0 3,15,27-28
+packages/domain/src/index.ts
+  s_17f9ca4f7cdcbf::t_80eb39b69d4d09 4
+packages/domain/src/tests/chat-events.test.ts
+  s_17f9ca4f7cdcbf::t_4322e29484371b 9
+apps/mobile/src/components/BrandLogo.tsx
+  s_17f9ca4f7cdcbf::t_0d86d3a69b35a6 4
+apps/mobile/src/screens/MealPlan.tsx
+  s_17f9ca4f7cdcbf::t_334afec99e5ac8 24
+packages/domain/src/domain-types.ts
+  s_17f9ca4f7cdcbf::t_4d5fa2fbf26c18 27
+packages/domain/src/meal-edit.ts
+  s_17f9ca4f7cdcbf::t_e255c649029b21 2
+packages/domain/src/notifications.ts
+  s_17f9ca4f7cdcbf::t_fdbab55f2b3526 2
+apps/server/src/routes/grocery-requests.routes.ts
+  s_17f9ca4f7cdcbf::t_ca60531975a7c8 1-28,30-327
+  s_17f9ca4f7cdcbf::t_5a04b7d28c9e7f 29
+packages/domain/src/tests/localization.test.ts
+  s_17f9ca4f7cdcbf::t_12a81e4dc3ca48 37
+  s_17f9ca4f7cdcbf::t_a4c5af84c7c944 21-22,36
+apps/server/src/household-auth.ts
+  s_17f9ca4f7cdcbf::t_c8cb5d05644632 4,32-34,40
+apps/mobile/src/tests/accessibility.test.ts
+  s_17f9ca4f7cdcbf::t_c10f93bcd9c980 65-66,80-83
+  s_17f9ca4f7cdcbf::t_d66e464efa20af 171,185
+packages/domain/src/tests/household-isolation.test.ts
+  s_17f9ca4f7cdcbf::t_5566fbcea47e59 3,16,22,32,159,202
+packages/db/src/tests/drizzle-repository.test.ts
+  s_17f9ca4f7cdcbf::t_8fc375daccb3b4 4
+  s_17f9ca4f7cdcbf::t_f2a814d7c7d9b5 15,21,50
+packages/domain/src/chat-media.ts
+  s_17f9ca4f7cdcbf::t_aed49ba01fc833 4
+packages/domain/src/chat-lifecycle.ts
+  s_17f9ca4f7cdcbf::t_042f44ad007c58 2
+apps/server/src/routes/invites.routes.ts
+  s_17f9ca4f7cdcbf::t_cc05aa98e821b0 55
+  s_17f9ca4f7cdcbf::t_5dc042ad0a6f68 1-54,56-422
+apps/server/src/routes/grocery-provider.routes.ts
+  s_17f9ca4f7cdcbf::t_2056cbf9655eae 31
+  s_17f9ca4f7cdcbf::t_db1279b56e58d6 28
+  s_17f9ca4f7cdcbf::t_e57ba87d62b1bb 1-27,29-30,32-458
+apps/mobile/src/screens/MemberShell.tsx
+  s_17f9ca4f7cdcbf::t_9e241657f06b85 33
+packages/domain/src/provider.ts
+  s_17f9ca4f7cdcbf::t_a0298915b6ce92 2
+packages/domain/src/tests/chat-lifecycle.test.ts
+  s_17f9ca4f7cdcbf::t_20aaf36a7f9431 4
+packages/domain/src/in-memory.ts
+  s_17f9ca4f7cdcbf::t_6f50cb34d92fdd 1,108,117,143,214,255,297,454,507,521,583,601
+  s_17f9ca4f7cdcbf::t_8949831c5f3fce 34
+packages/domain/src/intent.ts
+  s_17f9ca4f7cdcbf::t_97f434fbf0b946 1
+packages/db/src/index.ts
+  s_17f9ca4f7cdcbf::t_9bb32f7f7fd164 3
+apps/server/src/routes/chat.routes.ts
+  s_17f9ca4f7cdcbf::t_966cbbb04589b8 46
+  s_17f9ca4f7cdcbf::t_4000f7bb0d41c6 1-45,47-821
+packages/domain/src/tests/grocery-request.test.ts
+  s_17f9ca4f7cdcbf::t_845c475f61762c 17-18,346,352
+apps/server/src/tests/provider-stub.test.ts
+  s_17f9ca4f7cdcbf::t_28bc7b02f0378d 3,14
+apps/mobile/src/screens/Chat.tsx
+  s_17f9ca4f7cdcbf::t_71913b41ba2210 36
+apps/server/src/routes/grocery-checkout.routes.ts
+  s_17f9ca4f7cdcbf::t_006b62a820a2c1 1-37,39-546
+  s_17f9ca4f7cdcbf::t_8b129106e7b1e7 38
+apps/server/src/routes/households.routes.ts
+  s_17f9ca4f7cdcbf::t_e3debad7783efd 21
+  s_17f9ca4f7cdcbf::t_b9a672733919d1 1-20,22-326
+apps/mobile/src/screens/Groceries.tsx
+  s_17f9ca4f7cdcbf::t_51e4e87656ca03 23
+packages/domain/src/grocery-request.ts
+  s_17f9ca4f7cdcbf::t_4ccc7e720ac5cc 9
+packages/domain/src/tests/push-dispatch.test.ts
+  s_17f9ca4f7cdcbf::t_c1990abafcdb6b 3,11,26-32,57-58,74-75,88,98,115,118,128,130,426-428,433,441,444,447,452,460-461,466
+apps/server/src/tests/provider-swiggy.test.ts
+  s_17f9ca4f7cdcbf::t_074c2c65d5cdda 3,10,243
+packages/domain/src/chat-events.ts
+  s_17f9ca4f7cdcbf::t_0e0fa566d82125 1
+apps/server/src/routes/suggested-cart.routes.ts
+  s_17f9ca4f7cdcbf::t_324f69173f9a3f 19
+  s_17f9ca4f7cdcbf::t_db1279b56e58d6 105,110-112
+  s_17f9ca4f7cdcbf::t_a6f093b2b0207a 1-12,14-18,20-104,106-109,113-136
+  s_17f9ca4f7cdcbf::t_818bbca7bcdb33 13
+packages/domain/src/checkout.ts
+  s_17f9ca4f7cdcbf::t_15ac9a20feeba5 1
+packages/domain/src/tests/checkout.test.ts
+  s_17f9ca4f7cdcbf::t_dae32798d16f9c 3,20-21,211
+apps/server/src/routes/meal-plan.routes.ts
+  s_17f9ca4f7cdcbf::t_0bf2b44ae3b0a2 41
+  s_17f9ca4f7cdcbf::t_db1279b56e58d6 13-25
+  s_17f9ca4f7cdcbf::t_d28998ba7605c1 1-12,26-40,42-625
+packages/db/src/drizzle-repository.ts
+  s_17f9ca4f7cdcbf::t_2f5d6911387354 42-46
+  s_17f9ca4f7cdcbf::t_db1279b56e58d6 4,120-121,156,246,251,364,568,640,738,787,993,1005,1011,1020-1022,1031-1034,1042,1051-1053,1055,1063-1066,1072,1078-1080,1089,1095-1096,1098,1106-1109,1119-1123,1130-1131,1139-1141,1149,1155,1163-1164,1175-1176
+apps/mobile/src/components/Mascot.tsx
+  s_17f9ca4f7cdcbf::t_19d99fae73e08d 3
+packages/domain/src/tests/authorization.test.ts
+  s_17f9ca4f7cdcbf::t_c4e7c91521370c 7,15,45,55,77,101
+apps/mobile/app/invite.tsx
+  s_17f9ca4f7cdcbf::t_ea729702e8e2c6 6
+packages/domain/src/tests/v1-journey.test.ts
+  s_17f9ca4f7cdcbf::t_fb0a3f509bf0bd 3,16,46,82,113,276,283
+apps/server/src/push-delivery.ts
+  s_17f9ca4f7cdcbf::t_9d979b34ad6980 1-314
+packages/domain/src/recipes.ts
+  s_17f9ca4f7cdcbf::t_409ca0a35d832c 1
+apps/server/src/tests/grocery-checkout.routes.test.ts
+  s_17f9ca4f7cdcbf::t_5e6699118dd5ca 6-7
+apps/mobile/src/screens/Archive.tsx
+  s_17f9ca4f7cdcbf::t_c256473a944487 15
+apps/server/src/routes/route-context.ts
+  s_17f9ca4f7cdcbf::t_76ec24c5dd961a 1,3-51
+  s_17f9ca4f7cdcbf::t_db1279b56e58d6 2
+apps/mobile/src/screens/Cookbook.tsx
+  s_17f9ca4f7cdcbf::t_e36773ebf8b06d 17
+apps/server/src/routes/notifications.routes.ts
+  s_17f9ca4f7cdcbf::t_db1279b56e58d6 14
+  s_17f9ca4f7cdcbf::t_02c409768e7e85 1-13,15-17,19-232
+  s_17f9ca4f7cdcbf::t_741931d986f791 18
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.23",
+  "base_commit_sha": "0d02b626f038f6ff13b8ba5543d21a87ae94fb2c",
+  "prompts": {},
+  "sessions": {
+    "s_17f9ca4f7cdcbf": {
+      "agent_id": {
+        "tool": "pi",
+        "id": "01a02861-740a-7684-99bf-9f3a7086bab3",
+        "model": "glm-5.3"
+      },
+      "human_author": "Ashish Huddar <ashish.hudar@gmail.com>"
+    }
+  }
+}
