@@ -36,6 +36,7 @@ import { MealPlanScreen } from './MealPlan';
 import { GroceriesScreen } from './Groceries';
 import { ChatScreen } from './Chat';
 import heroGradient from '../../assets/hero-gradient.png';
+import { captureAnalyticsEvent } from '../lib/analytics';
 
 const MEMBER_TABS: readonly TabSpec[] = [
   { key: 'today', label: 'Today', icon: 'plate' },
@@ -67,7 +68,25 @@ export function MemberShell({ household }: { household: HouseholdSummary }) {
   const { revoked } = useAccessProbe(household.id);
   const closeChat = useCallback(() => setChatOpen(false), []);
   const openChat = useCallback(() => setChatOpen(true), []);
-  const openMealPlan = useCallback(() => setTab('mealPlan'), []);
+  const openMealPlan = useCallback(() => {
+    captureAnalyticsEvent('meal_plan_opened', {
+      household_role: household.role,
+      source: 'today_empty_state',
+    });
+    setTab('mealPlan');
+  }, [household.role]);
+  const selectTab = useCallback(
+    (nextTab: TabKey) => {
+      if (nextTab === 'mealPlan' && tab !== 'mealPlan') {
+        captureAnalyticsEvent('meal_plan_opened', {
+          household_role: household.role,
+          source: 'bottom_tab',
+        });
+      }
+      setTab(nextTab);
+    },
+    [household.role, tab],
+  );
   const headerStyle = useMemo(
     () => [shell.header, { paddingTop: insets.top + 10, minHeight: insets.top + 68 }],
     [insets.top],
@@ -114,7 +133,7 @@ export function MemberShell({ household }: { household: HouseholdSummary }) {
         ) : (
           <GroceriesScreen household={household} />
         )}
-        {!recipeOpen ? <BottomTabs tabs={MEMBER_TABS} active={tab} onSelect={setTab} /> : null}
+        {!recipeOpen ? <BottomTabs tabs={MEMBER_TABS} active={tab} onSelect={selectTab} /> : null}
       </View>
     </TabBarMinimizeProvider>
   );
@@ -190,6 +209,23 @@ function MemberToday({
   const today = weekDays[0]!.key;
   const [selectedDate, setSelectedDate] = useState(today);
   const selectedDay = weekDays.find((day) => day.key === selectedDate) ?? weekDays[0]!;
+  const selectDate = useCallback(
+    (date: string) => {
+      if (date === selectedDate) return;
+      const dayOffset = Math.max(
+        0,
+        weekDays.findIndex((day) => day.key === date),
+      );
+      captureAnalyticsEvent('week_day_selected', {
+        day_offset: dayOffset,
+        relative_day: dayOffset === 0 ? 'today' : dayOffset === 1 ? 'tomorrow' : 'later',
+        household_role: household.role,
+        source: 'today_feed',
+      });
+      setSelectedDate(date);
+    },
+    [household.role, selectedDate, weekDays],
+  );
 
   useEffect(() => {
     setMeals(null);
@@ -215,7 +251,7 @@ function MemberToday({
   const nextMeal =
     selectedDate === today
       ? chooseNextMeal(selectedMeals, now.getHours())
-      : selectedMeals.find((meal) => meal.mealType === 'breakfast') ?? selectedMeals[0] ?? null;
+      : (selectedMeals.find((meal) => meal.mealType === 'breakfast') ?? selectedMeals[0] ?? null);
   const otherMeals = selectedMeals.filter((meal) => meal.id !== nextMeal?.id);
   const dateLabel = now.toLocaleDateString(undefined, {
     weekday: 'long',
@@ -244,7 +280,7 @@ function MemberToday({
       </FadeSlideIn>
 
       <FadeSlideIn delay={45}>
-        <WeekSwitcher days={weekDays} selected={selectedDate} onSelect={setSelectedDate} />
+        <WeekSwitcher days={weekDays} selected={selectedDate} onSelect={selectDate} />
       </FadeSlideIn>
 
       <FadeSlideIn delay={60}>
@@ -363,9 +399,7 @@ function WeekDayButton({
       <Text style={selected ? WEEK_DAY_NAME_SELECTED_STYLE : today_.weekDayName}>
         {day.weekday}
       </Text>
-      <Text
-        style={selected ? WEEK_DAY_NUMBER_SELECTED_STYLE : today_.weekDayNumber}
-      >
+      <Text style={selected ? WEEK_DAY_NUMBER_SELECTED_STYLE : today_.weekDayNumber}>
         {day.dateNumber}
       </Text>
     </PressableScale>

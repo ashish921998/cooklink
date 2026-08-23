@@ -60,7 +60,8 @@
       "expo-web-browser",
       "expo-status-bar",
       "@clerk/expo",
-      "expo-asset"
+      "expo-asset",
+      "expo-localization"
     ],
     "extra": {
       "router": {},

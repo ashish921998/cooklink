@@ -25,6 +25,7 @@ import { Mascot, MascotState } from '../src/components/Mascot';
 import { MemberShell } from '../src/screens/MemberShell';
 import { CookShell } from '../src/screens/CookShell';
 import { Text, TextInput } from '../src/components/Typography';
+import { identifyAnalyticsUser, resetAnalyticsUser } from '../src/lib/analytics';
 
 const DESIGN_PREVIEW_HOUSEHOLD = {
   id: 'preview-household',
@@ -109,6 +110,18 @@ function AuthenticatedHome() {
   const { isLoaded, isSignedIn, user } = useUser();
   const router = useRouter();
   const params = useLocalSearchParams<{ pending_invite_token?: string }>();
+
+  useEffect(() => {
+    if (devAuthEnabled) {
+      identifyAnalyticsUser(
+        process.env.EXPO_PUBLIC_COOKLINK_DEV_USER_ID ?? 'cooklink-mobile-dev-owner',
+      );
+      return;
+    }
+    if (!isLoaded) return;
+    if (isSignedIn && user) identifyAnalyticsUser(user.id);
+    else resetAnalyticsUser();
+  }, [isLoaded, isSignedIn, user]);
 
   // After OTP completes, carry the preserved invite token back to /invite so
   // the recipient can accept in one continuous flow.

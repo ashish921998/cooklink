@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ApiError, useApi } from '../lib/api';
 import type { HouseholdSummary, PlannedMeal, RecipeSearchResult } from '../lib/households';
 import { mealImage } from '../lib/meal-images';
+import { captureAnalyticsEvent } from '../lib/analytics';
 import {
   Card,
   Chip,
@@ -185,10 +186,16 @@ export function MealPlanScreen({
 
   const openRecipe = useCallback(
     (meal: PlannedMeal) => {
+      captureAnalyticsEvent('recipe_opened', {
+        has_recipe: Boolean(meal.recipeId),
+        household_role: household.role,
+        meal_type: meal.mealType,
+        source: 'meal_plan',
+      });
       setViewingMeal(meal);
       onRecipeOpenChange?.(true);
     },
-    [onRecipeOpenChange],
+    [household.role, onRecipeOpenChange],
   );
 
   const closeRecipe = useCallback(() => {

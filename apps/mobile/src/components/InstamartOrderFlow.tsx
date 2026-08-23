@@ -3,6 +3,7 @@ import { Linking, StyleSheet, View } from 'react-native';
 import * as ExpoLinking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 import { useApi, ApiError } from '../lib/api';
+import { captureAnalyticsEvent } from '../lib/analytics';
 import {
   cartNeedName,
   formatRupees,
@@ -258,6 +259,12 @@ export function InstamartOrderFlow({ householdId }: { householdId: string }) {
         body: JSON.stringify({ addressId: selectedAddressId, mode: cartMode }),
       });
       setReview(result.review);
+      captureAnalyticsEvent('cart_review_opened', {
+        cart_mode: cartMode,
+        has_unavailable_items: result.review.hasUnavailableItems,
+        item_count: result.review.items.length,
+        provider: 'instamart',
+      });
       setPaymentMethodId(result.review.availablePaymentMethods[0]?.id ?? null);
       setConfirmation(null);
       setEligibility(null);
@@ -276,6 +283,11 @@ export function InstamartOrderFlow({ householdId }: { householdId: string }) {
 
   const prepareConfirmation = useCallback(async () => {
     if (!selectedAddressId || !paymentMethodId) return;
+    captureAnalyticsEvent('checkout_started', {
+      has_unavailable_items: review?.hasUnavailableItems ?? false,
+      item_count: review?.items.length ?? 0,
+      provider: 'instamart',
+    });
     setBusy('prepare-checkout');
     setError(null);
     try {
@@ -294,7 +306,7 @@ export function InstamartOrderFlow({ householdId }: { householdId: string }) {
     } finally {
       setBusy(null);
     }
-  }, [api, paymentMethodId, providerPath, selectedAddressId]);
+  }, [api, paymentMethodId, providerPath, review, selectedAddressId]);
 
   const placeOrder = useCallback(async () => {
     if (!confirmation) return;
