@@ -9,6 +9,8 @@ local design-preview fixture.
 - Organization: `Vinesight`
 - Project: `Cooklink` (`572931`, US Cloud)
 - Launch dashboard: <https://us.posthog.com/project/572931/dashboard/2024182>
+- `EXPO_PUBLIC_POSTHOG_API_KEY` and `EXPO_PUBLIC_POSTHOG_HOST` are configured in the EAS
+  `preview` and `production` environments.
 - Setup verification and development-build events carry `is_test_event=true`; every product
   insight excludes them.
 
