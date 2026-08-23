@@ -217,6 +217,21 @@ test('AC#2: segment controls in MemberShell use accessibilityRole (non-colour st
   );
 });
 
+test('Week Switcher exposes each day as a labelled selected-state control', () => {
+  const source = readSrc('screens/MemberShell.tsx');
+  const weekSwitcher = source.slice(source.indexOf('function WeekDayButton'));
+  assert.ok(weekSwitcher.includes('accessibilityRole="button"'));
+  assert.ok(weekSwitcher.includes('accessibilityLabel={`${day.relativeLabel}, ${day.fullLabel}`}'));
+  assert.ok(weekSwitcher.includes('accessibilityState={selected'));
+});
+
+test('Week Switcher filters the Today feed and updates its meal heading', () => {
+  const source = readSrc('screens/MemberShell.tsx');
+  assert.ok(source.includes('meal.date === selectedDate'));
+  assert.ok(source.includes('{mealsTitle(selectedDay)}'));
+  assert.ok(source.includes('setSelectedDate'));
+});
+
 test('AC#2: Chat back button meets 44pt touch-target floor', () => {
   const source = readSrc('screens/Chat.tsx');
   const m = source.match(/back:\s*\{[^}]*minHeight:\s*(\d+)/);

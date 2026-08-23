@@ -127,6 +127,51 @@ function greetingFor(date: Date): string {
   return 'Good evening';
 }
 
+type WeekDay = {
+  key: string;
+  weekday: string;
+  weekdayLong: string;
+  dateNumber: string;
+  fullLabel: string;
+  relativeLabel: string;
+};
+
+function dateKey(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function buildWeekDays(today: Date): WeekDay[] {
+  return Array.from({ length: 7 }, (_, offset) => {
+    const date = new Date(today);
+    date.setHours(12, 0, 0, 0);
+    date.setDate(date.getDate() + offset);
+    const weekday = date.toLocaleDateString(undefined, { weekday: 'short' });
+    const weekdayLong = date.toLocaleDateString(undefined, { weekday: 'long' });
+    const fullLabel = date.toLocaleDateString(undefined, {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+    });
+    return {
+      key: dateKey(date),
+      weekday,
+      weekdayLong,
+      dateNumber: date.toLocaleDateString(undefined, { day: 'numeric' }),
+      fullLabel,
+      relativeLabel: offset === 0 ? 'today' : offset === 1 ? 'tomorrow' : weekdayLong,
+    };
+  });
+}
+
+function mealsTitle(day: WeekDay): string {
+  if (day.relativeLabel === 'today') return "Today's meals";
+  if (day.relativeLabel === 'tomorrow') return "Tomorrow's meals";
+  return `${day.weekdayLong}'s meals`;
+}
+
 function MemberToday({
   household,
   onOpenMealPlan,
@@ -141,6 +186,10 @@ function MemberToday({
   const [error, setError] = useState<string | null>(null);
   const [changed, setChanged] = useState(0);
   const markChanged = useCallback(() => setChanged((value) => value + 1), []);
+  const weekDays = useMemo(() => buildWeekDays(new Date()), []);
+  const today = weekDays[0]!.key;
+  const [selectedDate, setSelectedDate] = useState(today);
+  const selectedDay = weekDays.find((day) => day.key === selectedDate) ?? weekDays[0]!;
 
   useEffect(() => {
     setMeals(null);
@@ -162,10 +211,12 @@ function MemberToday({
   }, [api, household.id, household.role, changed]);
 
   const now = new Date();
-  const today = now.toISOString().slice(0, 10);
-  const todayMeals = (meals ?? []).filter((m) => m.date === today);
-  const nextMeal = chooseNextMeal(todayMeals, now.getHours());
-  const otherMeals = todayMeals.filter((meal) => meal.id !== nextMeal?.id);
+  const selectedMeals = (meals ?? []).filter((meal) => meal.date === selectedDate);
+  const nextMeal =
+    selectedDate === today
+      ? chooseNextMeal(selectedMeals, now.getHours())
+      : selectedMeals.find((meal) => meal.mealType === 'breakfast') ?? selectedMeals[0] ?? null;
+  const otherMeals = selectedMeals.filter((meal) => meal.id !== nextMeal?.id);
   const dateLabel = now.toLocaleDateString(undefined, {
     weekday: 'long',
     day: 'numeric',
@@ -185,17 +236,21 @@ function MemberToday({
           <Text style={today_.greetingBody}>
             {meals === null
               ? 'Checking the kitchen…'
-              : todayMeals.length > 0
-                ? `${todayMeals.length} meals planned for today.`
-                : 'Nothing planned yet for today.'}
+              : selectedMeals.length > 0
+                ? `${selectedMeals.length} meals planned for ${selectedDay.relativeLabel}.`
+                : `Nothing planned yet for ${selectedDay.relativeLabel}.`}
           </Text>
         </View>
+      </FadeSlideIn>
+
+      <FadeSlideIn delay={45}>
+        <WeekSwitcher days={weekDays} selected={selectedDate} onSelect={setSelectedDate} />
       </FadeSlideIn>
 
       <FadeSlideIn delay={60}>
         <View style={today_.sectionHead}>
           <Text style={styles.eyebrow}>On the table</Text>
-          <Text style={today_.sectionTitle}>Today&apos;s meals</Text>
+          <Text style={today_.sectionTitle}>{mealsTitle(selectedDay)}</Text>
         </View>
       </FadeSlideIn>
 
@@ -209,7 +264,15 @@ function MemberToday({
       ) : nextMeal ? (
         <>
           <FadeSlideIn delay={100}>
-            <HeroMeal meal={nextMeal} dietStyle={household.dietStyle} />
+            <HeroMeal
+              meal={nextMeal}
+              dietStyle={household.dietStyle}
+              pickLabel={
+                selectedDay.relativeLabel === 'today'
+                  ? "Today's pick"
+                  : `${selectedDay.weekdayLong}'s pick`
+              }
+            />
           </FadeSlideIn>
           {otherMeals.map((meal, index) => (
             <FadeSlideIn key={meal.id} delay={140 + index * 55}>
@@ -221,7 +284,7 @@ function MemberToday({
         <FadeSlideIn>
           <Card>
             <Text style={styles.subtitle}>
-              No meals planned for today. Open Meal Plan to generate the week.
+              No meals planned for {selectedDay.relativeLabel}. Open Meal Plan to adjust the week.
             </Text>
             <PressableScale
               accessibilityRole="button"
@@ -249,6 +312,66 @@ function MemberToday({
   );
 }
 
+function WeekSwitcher({
+  days,
+  selected,
+  onSelect,
+}: {
+  days: WeekDay[];
+  selected: string;
+  onSelect: (date: string) => void;
+}) {
+  const activeDay = days.find((day) => day.key === selected) ?? days[0]!;
+  return (
+    <View style={today_.weekSwitcher} accessibilityLabel="Choose a day this week">
+      <View style={today_.weekSwitcherHead}>
+        <Text style={styles.eyebrow}>This week</Text>
+        <Text style={today_.selectedDayLabel}>{activeDay.fullLabel}</Text>
+      </View>
+      <View style={today_.weekDays}>
+        {days.map((day) => (
+          <WeekDayButton
+            key={day.key}
+            day={day}
+            selected={day.key === selected}
+            onSelect={onSelect}
+          />
+        ))}
+      </View>
+    </View>
+  );
+}
+
+function WeekDayButton({
+  day,
+  selected,
+  onSelect,
+}: {
+  day: WeekDay;
+  selected: boolean;
+  onSelect: (date: string) => void;
+}) {
+  const selectDay = useCallback(() => onSelect(day.key), [day.key, onSelect]);
+  return (
+    <PressableScale
+      accessibilityRole="button"
+      accessibilityLabel={`${day.relativeLabel}, ${day.fullLabel}`}
+      accessibilityState={selected ? SELECTED_ACCESSIBILITY_STATE : UNSELECTED_ACCESSIBILITY_STATE}
+      style={selected ? WEEK_DAY_SELECTED_STYLE : today_.weekDay}
+      onPress={selectDay}
+    >
+      <Text style={selected ? WEEK_DAY_NAME_SELECTED_STYLE : today_.weekDayName}>
+        {day.weekday}
+      </Text>
+      <Text
+        style={selected ? WEEK_DAY_NUMBER_SELECTED_STYLE : today_.weekDayNumber}
+      >
+        {day.dateNumber}
+      </Text>
+    </PressableScale>
+  );
+}
+
 function chooseNextMeal(meals: PlannedMeal[], hour: number): PlannedMeal | null {
   const preferred = hour < 10 ? 'breakfast' : hour < 15 ? 'lunch' : 'dinner';
   return meals.find((meal) => meal.mealType === preferred) ?? meals[0] ?? null;
@@ -257,9 +380,11 @@ function chooseNextMeal(meals: PlannedMeal[], hour: number): PlannedMeal | null 
 function HeroMeal({
   meal,
   dietStyle,
+  pickLabel,
 }: {
   meal: PlannedMeal;
   dietStyle: HouseholdSummary['dietStyle'];
+  pickLabel: string;
 }) {
   const image = mealImage(meal.name, meal.mealType);
   return (
@@ -273,7 +398,7 @@ function HeroMeal({
           resizeMode="stretch"
         />
         <View style={today_.mealHeroCopy}>
-          <Text style={today_.editorPick}>Today&apos;s pick</Text>
+          <Text style={today_.editorPick}>{pickLabel}</Text>
           <Text style={today_.mealHeroName}>{meal.name}</Text>
           <Text style={today_.mealHeroMeta}>
             {meal.servings} servings · {dietStyle}
@@ -687,6 +812,50 @@ const today_ = StyleSheet.create({
     color: colors.ink,
   },
   greetingBody: { fontSize: 14, lineHeight: 20, color: colors.inkSoft },
+  weekSwitcher: {
+    gap: space.sm,
+    padding: space.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.lg,
+    backgroundColor: colors.card,
+  },
+  weekSwitcherHead: {
+    minHeight: 18,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space.sm,
+  },
+  selectedDayLabel: { flexShrink: 1, fontSize: 11, lineHeight: 15, color: colors.inkSoft },
+  weekDays: { flexDirection: 'row', gap: 5 },
+  weekDay: {
+    minWidth: 0,
+    minHeight: 52,
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 1,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+  },
+  weekDaySelected: { backgroundColor: colors.accentSoft, borderColor: colors.accent },
+  weekDayName: {
+    fontSize: 9,
+    lineHeight: 12,
+    fontWeight: '800',
+    color: colors.inkSoft,
+    textTransform: 'uppercase',
+  },
+  weekDayNumber: {
+    fontFamily: fonts.display,
+    fontSize: 17,
+    lineHeight: 20,
+    fontWeight: '600',
+    color: colors.ink,
+  },
+  weekDayTextSelected: { color: colors.accent },
   sectionTitle: {
     fontFamily: fonts.display,
     fontSize: 23,
@@ -797,3 +966,6 @@ const owner = StyleSheet.create({
 const SEGMENT_BUTTON_ACTIVE_STYLE = [styles.segmentButton, styles.segmentActive];
 const SEGMENT_TEXT_ACTIVE_STYLE = [styles.segmentText, styles.segmentTextActive];
 const DISABLED_PRIMARY_BUTTON_STYLE = [styles.primaryButton, styles.disabled];
+const WEEK_DAY_SELECTED_STYLE = [today_.weekDay, today_.weekDaySelected];
+const WEEK_DAY_NAME_SELECTED_STYLE = [today_.weekDayName, today_.weekDayTextSelected];
+const WEEK_DAY_NUMBER_SELECTED_STYLE = [today_.weekDayNumber, today_.weekDayTextSelected];
