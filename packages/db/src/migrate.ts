@@ -8,8 +8,8 @@ import * as schema from './schema.js';
  *   pnpm db:migrate
  */
 async function main() {
-  const url = process.env.DATABASE_URL;
-  if (!url) throw new Error('DATABASE_URL is required');
+  const url = process.env.MIGRATION_DATABASE_URL ?? process.env.DATABASE_URL;
+  if (!url) throw new Error('MIGRATION_DATABASE_URL or DATABASE_URL is required');
   const client = new pg.Client({ connectionString: url });
   await client.connect();
   const db = drizzle(client, { schema });
