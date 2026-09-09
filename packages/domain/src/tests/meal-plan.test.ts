@@ -4,6 +4,23 @@ import { generateStarterPlan, swapMealIdentities, regenerateKeepsEdited } from '
 
 const TODAY = '2026-01-10';
 
+test('regeneration excludes the previous slot even when randomness repeats', (t) => {
+  t.mock.method(Math, 'random', () => 0);
+  const seed = {
+    dietStyle: 'vegetarian' as const,
+    mealStyle: 'north' as const,
+    servings: 4,
+    specialMealEnabled: true,
+  };
+  const previous = generateStarterPlan(TODAY, seed);
+  const regenerated = generateStarterPlan(TODAY, seed, previous);
+  for (const [index, meal] of regenerated.entries()) {
+    assert.notEqual(meal.name, previous[index]!.name);
+    assert.equal(meal.date, previous[index]!.date);
+    assert.equal(meal.mealType, previous[index]!.mealType);
+  }
+});
+
 test('starter plan produces 7 days x 3 meals with no approval step', () => {
   const plan = generateStarterPlan(TODAY, {
     dietStyle: 'vegetarian',

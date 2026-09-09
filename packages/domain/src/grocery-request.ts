@@ -6,7 +6,7 @@ import type {
   GroceryRequest,
   GroceryRequestStatus,
   Language,
-} from './types.js';
+} from './domain-types.js';
 
 /**
  * The action layer for turning Cook (and Member) chat messages into

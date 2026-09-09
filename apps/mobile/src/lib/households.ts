@@ -208,6 +208,7 @@ export function useHouseholds() {
 
   const loadHouseholds = useCallback(async () => {
     const data = await api<{ households: HouseholdSummary[] }>('/v1/households');
+    setError(null);
     setHouseholds(data.households);
     return data.households;
   }, [api]);

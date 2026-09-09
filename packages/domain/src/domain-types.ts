@@ -24,7 +24,7 @@ export type MealStyle = 'north' | 'south';
 export type Language = 'en' | 'hi';
 
 /** The most restrictive diet style wins for shared meal generation (issue 04). */
-export function mostRestrictive(styles: DietStyle[]): DietStyle {
+export function mostRestrictiveDietStyle(styles: DietStyle[]): DietStyle {
   if (styles.includes('vegetarian')) return 'vegetarian';
   if (styles.includes('eggetarian')) return 'eggetarian';
   return 'nonvegetarian';

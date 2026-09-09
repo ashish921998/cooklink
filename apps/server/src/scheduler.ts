@@ -1,6 +1,7 @@
 import type { Logger } from 'pino';
 import type { Database } from '@cooklink/db';
 import {
+  cleanupExpiredFlowState,
   cleanupExpiredSwiggyTokens,
   cleanupStalePushTokens,
   expireStaleSuggestions,
@@ -32,6 +33,7 @@ export interface ScheduledJob {
 export const JOB_INTERVALS = {
   orderTrackingPollMs: 10_000,
   swiggyTokenCleanupMs: 60 * 60 * 1000, // 1h
+  flowStateCleanupMs: 60 * 60 * 1000, // 1h
   pushTokenCleanupMs: 6 * 60 * 60 * 1000, // 6h
   suggestionExpiryMs: 5 * 60 * 1000, // 5m
   mediaTtlSweepMs: 24 * 60 * 60 * 1000, // 24h
@@ -126,6 +128,11 @@ export function createScheduler(
       name: 'swiggy_token_cleanup',
       intervalMs: i.swiggyTokenCleanupMs,
       run: () => cleanupExpiredSwiggyTokens(db, now(), log),
+    },
+    {
+      name: 'flow_state_cleanup',
+      intervalMs: i.flowStateCleanupMs,
+      run: () => cleanupExpiredFlowState(db, now(), log),
     },
     {
       name: 'push_token_cleanup',

@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react';
-import { Linking, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Image, Linking, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApi } from '../lib/api';
+import { mealImage } from '../lib/meal-images';
 import {
   useAccessProbe,
   type HouseholdMember,
@@ -9,24 +11,43 @@ import {
   type PlannedMeal,
 } from '../lib/households';
 import {
-  BottomTabs,
+  Avatar,
   Card,
   ChatHeaderAction,
-  Loading,
+  Chip,
+  Divider,
+  FadeSlideIn,
   Message,
+  PotLoader,
+  PressableScale,
+  BottomTabs,
+  TabBarMinimizeProvider,
+  TabScrollView,
+  colors,
+  fonts,
+  radius,
+  space,
   styles,
   type TabKey,
   type TabSpec,
-} from '../components/ui';
+} from '../components/design-system';
+import { Text, TextInput } from '../components/Typography';
 import { MealPlanScreen } from './MealPlan';
 import { GroceriesScreen } from './Groceries';
 import { ChatScreen } from './Chat';
+import heroGradient from '../../assets/hero-gradient.png';
+import { captureAnalyticsEvent } from '../lib/analytics';
 
 const MEMBER_TABS: readonly TabSpec[] = [
-  { key: 'today', label: 'Today', glyph: '◐' },
-  { key: 'mealPlan', label: 'Meal Plan', glyph: '◳' },
-  { key: 'groceries', label: 'Groceries', glyph: '▦' },
+  { key: 'today', label: 'Today', icon: 'plate' },
+  { key: 'mealPlan', label: 'Meal Plan', icon: 'calendar' },
+  { key: 'groceries', label: 'Groceries', icon: 'basket' },
 ];
+
+const SELECTED_ACCESSIBILITY_STATE = { selected: true } as const;
+const UNSELECTED_ACCESSIBILITY_STATE = { selected: false } as const;
+const HERO_TEXT_SOFT = 'rgba(255,255,255,0.88)';
+const HERO_TEXT_SHADOW = 'rgba(0,0,0,0.72)';
 
 /**
  * The Household Member / Owner entry shell (issue 03 — Variant A). Launches
@@ -40,9 +61,36 @@ const MEMBER_TABS: readonly TabSpec[] = [
  * Members and Cooks.
  */
 export function MemberShell({ household }: { household: HouseholdSummary }) {
+  const insets = useSafeAreaInsets();
   const [tab, setTab] = useState<TabKey>('today');
   const [chatOpen, setChatOpen] = useState(false);
+  const [recipeOpen, setRecipeOpen] = useState(false);
   const { revoked } = useAccessProbe(household.id);
+  const closeChat = useCallback(() => setChatOpen(false), []);
+  const openChat = useCallback(() => setChatOpen(true), []);
+  const openMealPlan = useCallback(() => {
+    captureAnalyticsEvent('meal_plan_opened', {
+      household_role: household.role,
+      source: 'today_empty_state',
+    });
+    setTab('mealPlan');
+  }, [household.role]);
+  const selectTab = useCallback(
+    (nextTab: TabKey) => {
+      if (nextTab === 'mealPlan' && tab !== 'mealPlan') {
+        captureAnalyticsEvent('meal_plan_opened', {
+          household_role: household.role,
+          source: 'bottom_tab',
+        });
+      }
+      setTab(nextTab);
+    },
+    [household.role, tab],
+  );
+  const headerStyle = useMemo(
+    () => [shell.header, { paddingTop: insets.top + 10, minHeight: insets.top + 68 }],
+    [insets.top],
+  );
 
   // A removed member exits immediately with a plain explanation (issue 03).
   if (revoked)
@@ -54,86 +102,365 @@ export function MemberShell({ household }: { household: HouseholdSummary }) {
     );
 
   if (chatOpen) {
-    return <ChatScreen household={household} backLabel="Back" onBack={() => setChatOpen(false)} />;
+    return <ChatScreen household={household} backLabel="Back" onBack={closeChat} />;
   }
 
   return (
-    <View style={{ flex: 1 }}>
-      <View style={headerStyles.header}>
-        <Text style={headerStyles.name} numberOfLines={1}>
-          {household.name}
-        </Text>
-        <ChatHeaderAction onPress={() => setChatOpen(true)} />
+    <TabBarMinimizeProvider>
+      <View style={shell.root}>
+        {!recipeOpen ? (
+          <View style={headerStyle}>
+            <Avatar name={household.name} size={42} />
+            <View style={shell.headerCopy}>
+              <Text style={shell.headerName} numberOfLines={1}>
+                {household.name}
+              </Text>
+              <Text style={shell.headerRole}>
+                {household.role === 'owner' ? 'Household owner' : 'Household member'}
+              </Text>
+            </View>
+            <ChatHeaderAction onPress={openChat} />
+          </View>
+        ) : null}
+        {tab === 'today' ? (
+          <MemberToday household={household} onOpenMealPlan={openMealPlan} />
+        ) : tab === 'mealPlan' ? (
+          <MealPlanScreen
+            household={household}
+            includeTopSafeArea={false}
+            onRecipeOpenChange={setRecipeOpen}
+          />
+        ) : (
+          <GroceriesScreen household={household} />
+        )}
+        {!recipeOpen ? <BottomTabs tabs={MEMBER_TABS} active={tab} onSelect={selectTab} /> : null}
       </View>
-      {tab === 'today' ? (
-        <MemberToday household={household} />
-      ) : tab === 'mealPlan' ? (
-        <MealPlanScreen household={household} />
-      ) : (
-        <GroceriesScreen household={household} />
-      )}
-      <BottomTabs tabs={MEMBER_TABS} active={tab} onSelect={setTab} />
-    </View>
+    </TabBarMinimizeProvider>
   );
 }
 
-function MemberToday({ household }: { household: HouseholdSummary }) {
+function greetingFor(date: Date): string {
+  const hour = date.getHours();
+  if (hour < 12) return 'Good morning';
+  if (hour < 17) return 'Good afternoon';
+  return 'Good evening';
+}
+
+type WeekDay = {
+  key: string;
+  weekday: string;
+  weekdayLong: string;
+  dateNumber: string;
+  fullLabel: string;
+  relativeLabel: string;
+};
+
+function dateKey(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function buildWeekDays(today: Date): WeekDay[] {
+  return Array.from({ length: 7 }, (_, offset) => {
+    const date = new Date(today);
+    date.setHours(12, 0, 0, 0);
+    date.setDate(date.getDate() + offset);
+    const weekday = date.toLocaleDateString(undefined, { weekday: 'short' });
+    const weekdayLong = date.toLocaleDateString(undefined, { weekday: 'long' });
+    const fullLabel = date.toLocaleDateString(undefined, {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+    });
+    return {
+      key: dateKey(date),
+      weekday,
+      weekdayLong,
+      dateNumber: date.toLocaleDateString(undefined, { day: 'numeric' }),
+      fullLabel,
+      relativeLabel: offset === 0 ? 'today' : offset === 1 ? 'tomorrow' : weekdayLong,
+    };
+  });
+}
+
+function mealsTitle(day: WeekDay): string {
+  if (day.relativeLabel === 'today') return "Today's meals";
+  if (day.relativeLabel === 'tomorrow') return "Tomorrow's meals";
+  return `${day.weekdayLong}'s meals`;
+}
+
+function MemberToday({
+  household,
+  onOpenMealPlan,
+}: {
+  household: HouseholdSummary;
+  onOpenMealPlan: () => void;
+}) {
   const api = useApi();
   const [meals, setMeals] = useState<PlannedMeal[] | null>(null);
   const [members, setMembers] = useState<HouseholdMember[]>([]);
   const [invites, setInvites] = useState<InviteSummary[]>([]);
+  const [error, setError] = useState<string | null>(null);
   const [changed, setChanged] = useState(0);
+  const markChanged = useCallback(() => setChanged((value) => value + 1), []);
+  const weekDays = useMemo(() => buildWeekDays(new Date()), []);
+  const today = weekDays[0]!.key;
+  const [selectedDate, setSelectedDate] = useState(today);
+  const selectedDay = weekDays.find((day) => day.key === selectedDate) ?? weekDays[0]!;
+  const selectDate = useCallback(
+    (date: string) => {
+      if (date === selectedDate) return;
+      const dayOffset = Math.max(
+        0,
+        weekDays.findIndex((day) => day.key === date),
+      );
+      captureAnalyticsEvent('week_day_selected', {
+        day_offset: dayOffset,
+        relative_day: dayOffset === 0 ? 'today' : dayOffset === 1 ? 'tomorrow' : 'later',
+        household_role: household.role,
+        source: 'today_feed',
+      });
+      setSelectedDate(date);
+    },
+    [household.role, selectedDate, weekDays],
+  );
 
   useEffect(() => {
     setMeals(null);
-    api<{ meals: PlannedMeal[] }>(`/v1/households/${household.id}/meal-plan`).then((data) =>
-      setMeals(data.meals),
-    );
+    setError(null);
+    api<{ meals: PlannedMeal[] }>(`/v1/households/${household.id}/meal-plan`)
+      .then((data) => setMeals(data.meals))
+      .catch((err: unknown) => {
+        setMeals([]);
+        setError(err instanceof Error ? err.message : "Could not load today's meals.");
+      });
     if (household.role === 'owner') {
-      api<{ members: HouseholdMember[] }>(`/v1/households/${household.id}/members`).then((data) =>
-        setMembers(data.members),
-      );
-      api<{ invites: InviteSummary[] }>(`/v1/households/${household.id}/invites`).then((data) =>
-        setInvites(data.invites),
-      );
+      api<{ members: HouseholdMember[] }>(`/v1/households/${household.id}/members`)
+        .then((data) => setMembers(data.members))
+        .catch(() => setMembers([]));
+      api<{ invites: InviteSummary[] }>(`/v1/households/${household.id}/invites`)
+        .then((data) => setInvites(data.invites))
+        .catch(() => setInvites([]));
     }
-  }, [api, household.id, changed]);
+  }, [api, household.id, household.role, changed]);
 
-  const today = new Date().toISOString().slice(0, 10);
-  const todayMeals = (meals ?? []).filter((m) => m.date === today);
+  const now = new Date();
+  const selectedMeals = (meals ?? []).filter((meal) => meal.date === selectedDate);
+  const nextMeal =
+    selectedDate === today
+      ? chooseNextMeal(selectedMeals, now.getHours())
+      : (selectedMeals.find((meal) => meal.mealType === 'breakfast') ?? selectedMeals[0] ?? null);
+  const otherMeals = selectedMeals.filter((meal) => meal.id !== nextMeal?.id);
+  const dateLabel = now.toLocaleDateString(undefined, {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+  });
 
   return (
-    <ScrollView contentContainerStyle={{ ...styles.screen, paddingTop: 16 }}>
-      <Text style={styles.eyebrow}>Today</Text>
-      <Card>
-        <Text style={styles.cardTitle}>Today's meals</Text>
-        {meals ? (
-          todayMeals.length > 0 ? (
-            todayMeals.map((meal) => (
-              <View key={meal.id} style={styles.mealRow}>
-                <Text style={styles.mealType}>{meal.mealType}</Text>
-                <Text style={styles.mealName}>
-                  {meal.name}
-                  {meal.isSpecial ? ' · special' : ''}
-                </Text>
-              </View>
-            ))
-          ) : (
-            <Text style={styles.subtitle}>No meals planned for today.</Text>
-          )
-        ) : (
-          <Loading />
-        )}
-      </Card>
+    <TabScrollView
+      testID="today-screen"
+      contentContainerStyle={today_.scroll}
+      showsVerticalScrollIndicator={false}
+    >
+      <FadeSlideIn>
+        <View style={today_.greeting}>
+          <Text style={today_.date}>{dateLabel}</Text>
+          <Text style={today_.greetingTitle}>{greetingFor(now)}</Text>
+          <Text style={today_.greetingBody}>
+            {meals === null
+              ? 'Checking the kitchen…'
+              : selectedMeals.length > 0
+                ? `${selectedMeals.length} meals planned for ${selectedDay.relativeLabel}.`
+                : `Nothing planned yet for ${selectedDay.relativeLabel}.`}
+          </Text>
+        </View>
+      </FadeSlideIn>
+
+      <FadeSlideIn delay={45}>
+        <WeekSwitcher days={weekDays} selected={selectedDate} onSelect={selectDate} />
+      </FadeSlideIn>
+
+      <FadeSlideIn delay={60}>
+        <View style={today_.sectionHead}>
+          <Text style={styles.eyebrow}>On the table</Text>
+          <Text style={today_.sectionTitle}>{mealsTitle(selectedDay)}</Text>
+        </View>
+      </FadeSlideIn>
+
+      {meals === null ? (
+        <PotLoader label="Reading the meal plan" />
+      ) : error ? (
+        <Card>
+          <Text style={styles.cardTitle}>Couldn&apos;t load today</Text>
+          <Text style={styles.subtitle}>{error}</Text>
+        </Card>
+      ) : nextMeal ? (
+        <>
+          <FadeSlideIn delay={100}>
+            <HeroMeal
+              meal={nextMeal}
+              dietStyle={household.dietStyle}
+              pickLabel={
+                selectedDay.relativeLabel === 'today'
+                  ? "Today's pick"
+                  : `${selectedDay.weekdayLong}'s pick`
+              }
+            />
+          </FadeSlideIn>
+          {otherMeals.map((meal, index) => (
+            <FadeSlideIn key={meal.id} delay={140 + index * 55}>
+              <MealCard meal={meal} />
+            </FadeSlideIn>
+          ))}
+        </>
+      ) : (
+        <FadeSlideIn>
+          <Card>
+            <Text style={styles.subtitle}>
+              No meals planned for {selectedDay.relativeLabel}. Open Meal Plan to adjust the week.
+            </Text>
+            <PressableScale
+              accessibilityRole="button"
+              accessibilityLabel="Open Meal Plan"
+              style={styles.primaryButton}
+              onPress={onOpenMealPlan}
+            >
+              <Text style={styles.primaryButtonText}>Open Meal Plan</Text>
+            </PressableScale>
+          </Card>
+        </FadeSlideIn>
+      )}
+
       {household.role === 'owner' ? (
-        <OwnerMembership
-          household={household}
-          members={members}
-          invites={invites}
-          onChanged={() => setChanged((n) => n + 1)}
-        />
+        <FadeSlideIn delay={260}>
+          <OwnerMembership
+            household={household}
+            members={members}
+            invites={invites}
+            onChanged={markChanged}
+          />
+        </FadeSlideIn>
       ) : null}
-    </ScrollView>
+    </TabScrollView>
+  );
+}
+
+function WeekSwitcher({
+  days,
+  selected,
+  onSelect,
+}: {
+  days: WeekDay[];
+  selected: string;
+  onSelect: (date: string) => void;
+}) {
+  const activeDay = days.find((day) => day.key === selected) ?? days[0]!;
+  return (
+    <View style={today_.weekSwitcher} accessibilityLabel="Choose a day this week">
+      <View style={today_.weekSwitcherHead}>
+        <Text style={styles.eyebrow}>This week</Text>
+        <Text style={today_.selectedDayLabel}>{activeDay.fullLabel}</Text>
+      </View>
+      <View style={today_.weekDays}>
+        {days.map((day) => (
+          <WeekDayButton
+            key={day.key}
+            day={day}
+            selected={day.key === selected}
+            onSelect={onSelect}
+          />
+        ))}
+      </View>
+    </View>
+  );
+}
+
+function WeekDayButton({
+  day,
+  selected,
+  onSelect,
+}: {
+  day: WeekDay;
+  selected: boolean;
+  onSelect: (date: string) => void;
+}) {
+  const selectDay = useCallback(() => onSelect(day.key), [day.key, onSelect]);
+  return (
+    <PressableScale
+      accessibilityRole="button"
+      accessibilityLabel={`${day.relativeLabel}, ${day.fullLabel}`}
+      accessibilityState={selected ? SELECTED_ACCESSIBILITY_STATE : UNSELECTED_ACCESSIBILITY_STATE}
+      style={selected ? WEEK_DAY_SELECTED_STYLE : today_.weekDay}
+      onPress={selectDay}
+    >
+      <Text style={selected ? WEEK_DAY_NAME_SELECTED_STYLE : today_.weekDayName}>
+        {day.weekday}
+      </Text>
+      <Text style={selected ? WEEK_DAY_NUMBER_SELECTED_STYLE : today_.weekDayNumber}>
+        {day.dateNumber}
+      </Text>
+    </PressableScale>
+  );
+}
+
+function chooseNextMeal(meals: PlannedMeal[], hour: number): PlannedMeal | null {
+  const preferred = hour < 10 ? 'breakfast' : hour < 15 ? 'lunch' : 'dinner';
+  return meals.find((meal) => meal.mealType === preferred) ?? meals[0] ?? null;
+}
+
+function HeroMeal({
+  meal,
+  dietStyle,
+  pickLabel,
+}: {
+  meal: PlannedMeal;
+  dietStyle: HouseholdSummary['dietStyle'];
+  pickLabel: string;
+}) {
+  const image = mealImage(meal.name, meal.mealType);
+  return (
+    <View accessible style={today_.mealHero} accessibilityLabel={`${meal.mealType}, ${meal.name}`}>
+      <View style={today_.mealHeroFrame}>
+        <Image source={image.source} style={today_.mealHeroImage} resizeMode="cover" />
+        <Image
+          accessible={false}
+          source={heroGradient}
+          style={today_.mealHeroShade}
+          resizeMode="stretch"
+        />
+        <View style={today_.mealHeroCopy}>
+          <Text style={today_.editorPick}>{pickLabel}</Text>
+          <Text style={today_.mealHeroName}>{meal.name}</Text>
+          <Text style={today_.mealHeroMeta}>
+            {meal.servings} servings · {dietStyle}
+          </Text>
+        </View>
+      </View>
+    </View>
+  );
+}
+
+/**
+ * One planned meal as a photo-led summary. The visible meal-type label keeps
+ * breakfast, lunch, and dinner explicit without turning the row into a new
+ * product action.
+ */
+function MealCard({ meal }: { meal: PlannedMeal }) {
+  const image = mealImage(meal.name, meal.mealType);
+  return (
+    <View accessible style={today_.mealCard} accessibilityLabel={`${meal.mealType}, ${meal.name}`}>
+      <Image source={image.source} style={today_.mealThumb} resizeMode="cover" />
+      <View style={today_.mealCardCopy}>
+        <Text style={today_.mealMeta}>{meal.mealType}</Text>
+        <Text style={today_.mealName} numberOfLines={2}>
+          {meal.name}
+        </Text>
+        <Text style={today_.mealServings}>{meal.servings} servings</Text>
+      </View>
+    </View>
   );
 }
 
@@ -166,29 +493,28 @@ function OwnerMembership({
   // WhatsApp). The message includes a tappable cooklink:// deep link so the
   // recipient can accept in one tap; the token is also shown as a fallback for
   // manual entry when the app is not yet installed or the link cannot open.
-  async function sendViaWhatsApp(
-    invitePhone: string,
-    inviteToken: string,
-    inviteRole: 'member' | 'cook',
-  ) {
-    const normalized = invitePhone.replace(/[^\d]/g, '');
-    const deepLink = `cooklink://invite?token=${encodeURIComponent(inviteToken)}`;
-    const message = `You're invited to join ${household.name} as a ${inviteRole} on Cooklink. Tap to accept: ${deepLink} (or open Cooklink and enter token: ${inviteToken})`;
-    const url = `https://wa.me/${normalized}?text=${encodeURIComponent(message)}`;
-    try {
-      const canOpen = await Linking.canOpenURL(url);
-      if (canOpen) {
-        await Linking.openURL(url);
-        setNotice(`WhatsApp opened with the ${inviteRole} invite message.`);
-        return;
+  const sendViaWhatsApp = useCallback(
+    async (invitePhone: string, inviteToken: string, inviteRole: 'member' | 'cook') => {
+      const normalized = invitePhone.replace(/[^\d]/g, '');
+      const deepLink = `cooklink://invite?token=${encodeURIComponent(inviteToken)}`;
+      const message = `You're invited to join ${household.name} as a ${inviteRole} on Cooklink. Tap to accept: ${deepLink} (or open Cooklink and enter token: ${inviteToken})`;
+      const url = `https://wa.me/${normalized}?text=${encodeURIComponent(message)}`;
+      try {
+        const canOpen = await Linking.canOpenURL(url);
+        if (canOpen) {
+          await Linking.openURL(url);
+          setNotice(`WhatsApp opened with the ${inviteRole} invite message.`);
+          return;
+        }
+      } catch {
+        // Fall through to the manual fallback below.
       }
-    } catch {
-      // Fall through to the manual fallback below.
-    }
-    setNotice(`WhatsApp is not available. Share this link with the ${inviteRole}: ${deepLink}`);
-  }
+      setNotice(`WhatsApp is not available. Share this link with the ${inviteRole}: ${deepLink}`);
+    },
+    [household.name],
+  );
 
-  async function createInvite() {
+  const createInvite = useCallback(async () => {
     setBusy(true);
     setError(null);
     setNotice(null);
@@ -205,144 +531,251 @@ function OwnerMembership({
     } finally {
       setBusy(false);
     }
-  }
+  }, [api, household.id, onChanged, phone, role, sendViaWhatsApp]);
 
-  async function resend(inviteId: string) {
-    setBusy(true);
-    setError(null);
-    setNotice(null);
-    try {
-      const result = await api<{ token: string; role: 'member' | 'cook' }>(
-        `/v1/invites/${inviteId}/resend`,
-        { method: 'POST' },
-      );
-      // The invite's phone is masked in the list; use the raw phone the owner
-      // entered for the WhatsApp link. If the owner navigated away, fall back
-      // to displaying the token.
-      const invitePhone = phone || '';
-      await sendViaWhatsApp(invitePhone, result.token, result.role);
-      onChanged();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not resend the invite.');
-    } finally {
-      setBusy(false);
-    }
-  }
+  const resend = useCallback(
+    async (inviteId: string) => {
+      setBusy(true);
+      setError(null);
+      setNotice(null);
+      try {
+        const result = await api<{ token: string; role: 'member' | 'cook' }>(
+          `/v1/invites/${inviteId}/resend`,
+          { method: 'POST' },
+        );
+        // The invite's phone is masked in the list; use the raw phone the owner
+        // entered for the WhatsApp link. If the owner navigated away, fall back
+        // to displaying the token.
+        const invitePhone = phone || '';
+        await sendViaWhatsApp(invitePhone, result.token, result.role);
+        onChanged();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Could not resend the invite.');
+      } finally {
+        setBusy(false);
+      }
+    },
+    [api, onChanged, phone, sendViaWhatsApp],
+  );
 
-  async function revoke(inviteId: string) {
-    setBusy(true);
-    setError(null);
-    try {
-      await api<{ ok: boolean }>(`/v1/invites/${inviteId}`, { method: 'DELETE' });
-      setNotice('Invite revoked.');
-      onChanged();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not revoke the invite.');
-    } finally {
-      setBusy(false);
-    }
-  }
+  const revoke = useCallback(
+    async (inviteId: string) => {
+      setBusy(true);
+      setError(null);
+      try {
+        await api<{ ok: boolean }>(`/v1/invites/${inviteId}`, { method: 'DELETE' });
+        setNotice('Invite revoked.');
+        onChanged();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Could not revoke the invite.');
+      } finally {
+        setBusy(false);
+      }
+    },
+    [api, onChanged],
+  );
 
-  async function remove(membershipId: string) {
-    setBusy(true);
-    setError(null);
-    try {
-      await api<{ ok: boolean }>(`/v1/households/${household.id}/members/${membershipId}`, {
-        method: 'DELETE',
-      });
-      setNotice('Access removed.');
-      onChanged();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not remove access.');
-    } finally {
-      setBusy(false);
-    }
-  }
+  const remove = useCallback(
+    async (membershipId: string) => {
+      setBusy(true);
+      setError(null);
+      try {
+        await api<{ ok: boolean }>(`/v1/households/${household.id}/members/${membershipId}`, {
+          method: 'DELETE',
+        });
+        setNotice('Access removed.');
+        onChanged();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Could not remove access.');
+      } finally {
+        setBusy(false);
+      }
+    },
+    [api, household.id, onChanged],
+  );
+
+  const selectCookRole = useCallback(() => setRole('cook'), []);
+  const selectMemberRole = useCallback(() => setRole('member'), []);
 
   return (
-    <Card>
-      <Text style={styles.cardTitle}>Invite people</Text>
-      <View style={styles.segment}>
-        <Pressable
-          accessibilityRole="button"
-          style={[styles.segmentButton, role === 'cook' && styles.segmentActive]}
-          onPress={() => setRole('cook')}
-        >
-          <Text style={styles.segmentText}>Cook</Text>
-        </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          style={[styles.segmentButton, role === 'member' && styles.segmentActive]}
-          onPress={() => setRole('member')}
-        >
-          <Text style={styles.segmentText}>Member</Text>
-        </Pressable>
+    <View style={owner.wrap}>
+      <View style={today_.sectionHead}>
+        <Text style={styles.eyebrow}>Owner</Text>
+        <Text style={styles.sectionTitle}>Who is in this household</Text>
       </View>
-      <Text style={styles.subtitle}>Send a WhatsApp invite to this phone number.</Text>
-      <InvitePhoneInput value={phone} onChange={setPhoneState} />
-      <Pressable
-        accessibilityRole="button"
-        style={[styles.primaryButton, busy && styles.disabled]}
-        disabled={busy}
-        onPress={createInvite}
-      >
-        <Text style={styles.primaryButtonText}>Create {role} invite</Text>
-      </Pressable>
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-      {notice ? <Text style={styles.subtitle}>{notice}</Text> : null}
+
+      <Card>
+        <Text style={styles.cardTitle}>Invite someone</Text>
+        <View style={styles.segment}>
+          <PressableScale
+            accessibilityRole="button"
+            accessibilityLabel="Invite a cook"
+            accessibilityState={
+              role === 'cook' ? SELECTED_ACCESSIBILITY_STATE : UNSELECTED_ACCESSIBILITY_STATE
+            }
+            style={role === 'cook' ? SEGMENT_BUTTON_ACTIVE_STYLE : styles.segmentButton}
+            onPress={selectCookRole}
+          >
+            <Text style={role === 'cook' ? SEGMENT_TEXT_ACTIVE_STYLE : styles.segmentText}>
+              Cook
+            </Text>
+          </PressableScale>
+          <PressableScale
+            accessibilityRole="button"
+            accessibilityLabel="Invite a member"
+            accessibilityState={
+              role === 'member' ? SELECTED_ACCESSIBILITY_STATE : UNSELECTED_ACCESSIBILITY_STATE
+            }
+            style={role === 'member' ? SEGMENT_BUTTON_ACTIVE_STYLE : styles.segmentButton}
+            onPress={selectMemberRole}
+          >
+            <Text style={role === 'member' ? SEGMENT_TEXT_ACTIVE_STYLE : styles.segmentText}>
+              Member
+            </Text>
+          </PressableScale>
+        </View>
+        <Text style={styles.subtitle}>
+          Cooklink sends the invite over WhatsApp. It only works from this phone number.
+        </Text>
+        <InvitePhoneInput value={phone} onChange={setPhoneState} />
+        <PressableScale
+          accessibilityRole="button"
+          accessibilityLabel={`Create ${role} invite`}
+          style={busy ? DISABLED_PRIMARY_BUTTON_STYLE : styles.primaryButton}
+          disabled={busy}
+          onPress={createInvite}
+        >
+          <Text style={styles.primaryButtonText}>
+            {busy ? 'Creating…' : `Create ${role} invite`}
+          </Text>
+        </PressableScale>
+        {error ? <Text style={styles.error}>{error}</Text> : null}
+        {notice ? <Text style={styles.subtitle}>{notice}</Text> : null}
+      </Card>
 
       {invites.length > 0 ? (
-        <>
-          <Text style={styles.sectionTitle}>Pending invites</Text>
-          {invites.map((invite) => (
-            <View key={invite.id} style={inviteStyles.row}>
-              <Text style={styles.listItem}>
-                {invite.role} · {invite.phoneMasked}
-              </Text>
-              <View style={inviteStyles.actions}>
-                <Pressable
-                  accessibilityRole="button"
-                  style={styles.ghostButton}
-                  disabled={busy}
-                  onPress={() => resend(invite.id)}
-                >
-                  <Text style={styles.ghostButtonText}>Resend</Text>
-                </Pressable>
-                <Pressable
-                  accessibilityRole="button"
-                  style={styles.ghostButton}
-                  disabled={busy}
-                  onPress={() => revoke(invite.id)}
-                >
-                  <Text style={styles.ghostButtonText}>Revoke</Text>
-                </Pressable>
-              </View>
-            </View>
+        <Card>
+          <Text style={styles.cardTitle}>Pending invites</Text>
+          {invites.map((invite, i) => (
+            <PendingInviteRow
+              key={invite.id}
+              invite={invite}
+              showDivider={i > 0}
+              busy={busy}
+              onResend={resend}
+              onRevoke={revoke}
+            />
           ))}
-        </>
+        </Card>
       ) : null}
 
-      <Text style={styles.sectionTitle}>Household members</Text>
-      {members.map((member) => (
-        <View key={member.id} style={inviteStyles.row}>
-          <Text style={styles.listItem}>
-            {member.role} · {member.notificationDefault}
-          </Text>
-          {member.role !== 'owner' ? (
-            <Pressable
-              accessibilityRole="button"
-              style={styles.ghostButton}
-              disabled={busy}
-              onPress={() => remove(member.id)}
-            >
-              <Text style={styles.ghostButtonText}>Remove</Text>
-            </Pressable>
-          ) : (
-            <Text style={styles.listItem}>owner</Text>
-          )}
+      <Card>
+        <Text style={styles.cardTitle}>Members and cooks</Text>
+        {members.map((member, i) => (
+          <MemberAccessRow
+            key={member.id}
+            member={member}
+            showDivider={i > 0}
+            busy={busy}
+            onRemove={remove}
+          />
+        ))}
+      </Card>
+    </View>
+  );
+}
+
+function PendingInviteRow({
+  invite,
+  showDivider,
+  busy,
+  onResend,
+  onRevoke,
+}: {
+  invite: InviteSummary;
+  showDivider: boolean;
+  busy: boolean;
+  onResend: (inviteId: string) => Promise<void>;
+  onRevoke: (inviteId: string) => Promise<void>;
+}) {
+  const resendInvite = useCallback(() => void onResend(invite.id), [invite.id, onResend]);
+  const revokeInvite = useCallback(() => void onRevoke(invite.id), [invite.id, onRevoke]);
+
+  return (
+    <View>
+      {showDivider ? <Divider /> : null}
+      <View style={owner.row}>
+        <View style={owner.rowText}>
+          <Chip
+            label={invite.role}
+            tint={invite.role === 'cook' ? colors.accentSoft : colors.brandSoft}
+            ink={invite.role === 'cook' ? colors.accent : colors.brand}
+          />
+          <Text style={owner.rowLabel}>{invite.phoneMasked}</Text>
         </View>
-      ))}
-    </Card>
+        <View style={owner.rowActions}>
+          <PressableScale
+            accessibilityRole="button"
+            accessibilityLabel={`Resend invite to ${invite.phoneMasked}`}
+            style={styles.ghostButton}
+            disabled={busy}
+            onPress={resendInvite}
+          >
+            <Text style={styles.ghostButtonText}>Resend</Text>
+          </PressableScale>
+          <PressableScale
+            accessibilityRole="button"
+            accessibilityLabel={`Revoke invite to ${invite.phoneMasked}`}
+            style={styles.ghostButton}
+            disabled={busy}
+            onPress={revokeInvite}
+          >
+            <Text style={owner.dangerAction}>Revoke</Text>
+          </PressableScale>
+        </View>
+      </View>
+    </View>
+  );
+}
+
+function MemberAccessRow({
+  member,
+  showDivider,
+  busy,
+  onRemove,
+}: {
+  member: HouseholdMember;
+  showDivider: boolean;
+  busy: boolean;
+  onRemove: (membershipId: string) => Promise<void>;
+}) {
+  const removeAccess = useCallback(() => void onRemove(member.id), [member.id, onRemove]);
+
+  return (
+    <View>
+      {showDivider ? <Divider /> : null}
+      <View style={owner.row}>
+        <View style={owner.rowText}>
+          <Chip
+            label={member.role}
+            tint={member.role === 'cook' ? colors.accentSoft : colors.brandSoft}
+            ink={member.role === 'cook' ? colors.accent : colors.brand}
+          />
+          <Text style={owner.rowLabel}>{member.notificationDefault}</Text>
+        </View>
+        {member.role !== 'owner' ? (
+          <PressableScale
+            accessibilityRole="button"
+            accessibilityLabel={`Remove ${member.role} access`}
+            style={styles.ghostButton}
+            disabled={busy}
+            onPress={removeAccess}
+          >
+            <Text style={owner.dangerAction}>Remove</Text>
+          </PressableScale>
+        ) : null}
+      </View>
+    </View>
   );
 }
 
@@ -362,30 +795,211 @@ function InvitePhoneInput({
       value={value}
       onChangeText={onChange}
       placeholder="+91 phone number"
+      placeholderTextColor={colors.inkSoft}
       keyboardType="phone-pad"
     />
   );
 }
 
-const headerStyles = {
+const shell = StyleSheet.create({
+  root: { flex: 1, backgroundColor: colors.surface },
   header: {
-    flexDirection: 'row' as const,
-    alignItems: 'center' as const,
-    justifyContent: 'space-between' as const,
-    paddingHorizontal: 24,
-    paddingTop: 56,
-    paddingBottom: 12,
-    backgroundColor: '#f7f3ed',
+    paddingHorizontal: 20,
+    paddingBottom: space.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.md,
+    backgroundColor: colors.surface,
   },
-  name: { fontSize: 20, fontWeight: '700' as const, color: '#24352f', flex: 1, marginRight: 12 },
-};
+  headerCopy: { flex: 1, gap: 2 },
+  headerName: {
+    fontFamily: fonts.display,
+    fontSize: 20,
+    lineHeight: 24,
+    fontWeight: '600',
+    color: colors.ink,
+  },
+  headerRole: { fontSize: 11, lineHeight: 15, color: colors.inkSoft },
+});
 
-const inviteStyles = {
-  row: {
-    flexDirection: 'row' as const,
-    alignItems: 'center' as const,
-    justifyContent: 'space-between' as const,
-    gap: 8,
+const today_ = StyleSheet.create({
+  scroll: {
+    paddingHorizontal: 20,
+    paddingTop: space.md,
+    paddingBottom: space.xxl,
+    gap: 18,
   },
-  actions: { flexDirection: 'row' as const, gap: 8 },
-};
+  greeting: { gap: 3, paddingBottom: space.sm },
+  date: {
+    fontSize: 10,
+    lineHeight: 13,
+    color: colors.inkSoft,
+    textTransform: 'uppercase',
+    letterSpacing: 1.5,
+    fontWeight: '700',
+  },
+  greetingTitle: {
+    fontFamily: fonts.display,
+    fontSize: 30,
+    lineHeight: 36,
+    fontWeight: '600',
+    color: colors.ink,
+  },
+  greetingBody: { fontSize: 14, lineHeight: 20, color: colors.inkSoft },
+  weekSwitcher: {
+    gap: space.sm,
+    padding: space.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.lg,
+    backgroundColor: colors.card,
+  },
+  weekSwitcherHead: {
+    minHeight: 18,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space.sm,
+  },
+  selectedDayLabel: { flexShrink: 1, fontSize: 11, lineHeight: 15, color: colors.inkSoft },
+  weekDays: { flexDirection: 'row', gap: 5 },
+  weekDay: {
+    minWidth: 0,
+    minHeight: 52,
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 1,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+  },
+  weekDaySelected: { backgroundColor: colors.accentSoft, borderColor: colors.accent },
+  weekDayName: {
+    fontSize: 9,
+    lineHeight: 12,
+    fontWeight: '800',
+    color: colors.inkSoft,
+    textTransform: 'uppercase',
+  },
+  weekDayNumber: {
+    fontFamily: fonts.display,
+    fontSize: 17,
+    lineHeight: 20,
+    fontWeight: '600',
+    color: colors.ink,
+  },
+  weekDayTextSelected: { color: colors.accent },
+  sectionTitle: {
+    fontFamily: fonts.display,
+    fontSize: 23,
+    lineHeight: 28,
+    fontWeight: '600',
+    color: colors.ink,
+  },
+  mealHero: { position: 'relative' },
+  mealHeroFrame: {
+    height: 236,
+    overflow: 'hidden',
+    borderRadius: radius.lg,
+    backgroundColor: colors.surfaceDeep,
+  },
+  mealHeroImage: { width: '100%', height: '100%' },
+  mealHeroShade: {
+    position: 'absolute',
+    right: 0,
+    bottom: 0,
+    left: 0,
+    width: '100%',
+    height: '76%',
+  },
+  mealHeroCopy: { position: 'absolute', right: 18, bottom: 16, left: 18, gap: 6 },
+  editorPick: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 5,
+    overflow: 'hidden',
+    backgroundColor: colors.coral,
+    color: colors.card,
+    fontSize: 11,
+    lineHeight: 13,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+    letterSpacing: 1.1,
+  },
+  mealHeroName: {
+    fontFamily: fonts.display,
+    fontSize: 25,
+    lineHeight: 30,
+    fontWeight: '600',
+    color: colors.card,
+    letterSpacing: -0.4,
+    textShadowColor: HERO_TEXT_SHADOW,
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 6,
+  },
+  mealHeroMeta: {
+    fontSize: 12,
+    color: HERO_TEXT_SOFT,
+    textTransform: 'capitalize',
+    textShadowColor: HERO_TEXT_SHADOW,
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
+  },
+  mealCard: {
+    minHeight: 112,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.lg,
+    paddingVertical: space.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  mealThumb: {
+    width: 112,
+    height: 96,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceDeep,
+  },
+  mealCardCopy: { flex: 1, gap: 4 },
+  mealName: {
+    fontFamily: fonts.display,
+    fontSize: 19,
+    lineHeight: 24,
+    fontWeight: '600',
+    color: colors.ink,
+  },
+  mealMeta: {
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: '800',
+    letterSpacing: 1.1,
+    color: colors.brand,
+    textTransform: 'uppercase',
+  },
+  mealServings: { fontSize: 12, lineHeight: 16, color: colors.inkSoft },
+  sectionHead: { gap: 3, marginTop: space.sm },
+});
+
+const owner = StyleSheet.create({
+  wrap: { gap: space.md, marginTop: space.sm },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space.sm,
+    paddingVertical: space.md,
+  },
+  rowText: { flexDirection: 'row', alignItems: 'center', gap: space.sm, flex: 1 },
+  rowLabel: { fontSize: 14, color: colors.inkSoft, flexShrink: 1 },
+  rowActions: { flexDirection: 'row', gap: space.sm },
+  dangerAction: { color: colors.danger, fontSize: 15, fontWeight: '700' },
+});
+
+const SEGMENT_BUTTON_ACTIVE_STYLE = [styles.segmentButton, styles.segmentActive];
+const SEGMENT_TEXT_ACTIVE_STYLE = [styles.segmentText, styles.segmentTextActive];
+const DISABLED_PRIMARY_BUTTON_STYLE = [styles.primaryButton, styles.disabled];
+const WEEK_DAY_SELECTED_STYLE = [today_.weekDay, today_.weekDaySelected];
+const WEEK_DAY_NAME_SELECTED_STYLE = [today_.weekDayName, today_.weekDayTextSelected];
+const WEEK_DAY_NUMBER_SELECTED_STYLE = [today_.weekDayNumber, today_.weekDayTextSelected];

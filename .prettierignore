@@ -4,5 +4,6 @@ build
 .expo
 coverage
 pnpm-lock.yaml
+.full-review
 *.md
 !IMPLEMENTATION.md

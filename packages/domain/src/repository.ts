@@ -30,7 +30,7 @@ import type {
   VoiceTranscript,
   GroceryRequest,
   NotificationLevel,
-} from './types.js';
+} from './domain-types.js';
 import type { ProductMatch } from './provider.js';
 
 /**

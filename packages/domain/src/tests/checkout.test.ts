@@ -1,11 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { id } from '../ids.js';
+import { brandId } from '../ids.js';
 import {
   decideCheckout,
   paymentSelection,
   shouldRetryCheckout,
   CART_VALUE_LIMIT_CENTS,
+  CART_VALUE_MINIMUM_CENTS,
   cartSignature,
   buildCheckoutConfirmation,
   confirmationMatches,
@@ -16,8 +17,8 @@ import {
 } from '../checkout.js';
 import type { ProviderCartReview, ProviderOrder } from '../provider.js';
 
-const HOUSEHOLD = id<'HouseholdId'>('h-1');
-const MEMBER = id<'MembershipId'>('m-1');
+const HOUSEHOLD = brandId<'HouseholdId'>('h-1');
+const MEMBER = brandId<'MembershipId'>('m-1');
 
 function makeReview(overrides: Partial<ProviderCartReview> = {}): ProviderCartReview {
   return {
@@ -67,10 +68,17 @@ function makeOrder(overrides: Partial<ProviderOrder> = {}): ProviderOrder {
   };
 }
 
-test('carts below ₹1,000 with a payment method are eligible', () => {
+test('carts between ₹99 and ₹1,000 with a payment method are eligible', () => {
   const d = decideCheckout(50_000, ['COD'], true);
   assert.equal(d.eligible, true);
   assert.equal(d.reason, 'eligible');
+  assert.equal(d.fallback, null);
+});
+
+test("carts below Instamart's ₹99 minimum stay in cart review", () => {
+  const d = decideCheckout(CART_VALUE_MINIMUM_CENTS - 1, ['COD'], true);
+  assert.equal(d.eligible, false);
+  assert.equal(d.reason, 'min_order_not_met');
   assert.equal(d.fallback, null);
 });
 
@@ -200,7 +208,7 @@ test('confirmationMatches: membership mismatch denies (AC#2 role binding)', () =
     paymentMethodId: 'pm-cod',
     now,
   });
-  const other = id<'MembershipId'>('m-2');
+  const other = brandId<'MembershipId'>('m-2');
   const result = confirmationMatches(
     conf,
     { membershipId: other, review: makeReview(), paymentMethodId: 'pm-cod' },

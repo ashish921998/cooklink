@@ -1,20 +1,47 @@
-import { useState, useEffect } from 'react';
-import {
-  ActivityIndicator,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { ScrollView, StyleSheet, View } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { useSignIn, useSignUp, useUser } from '@clerk/clerk-expo';
-import { useApi } from '../src/lib/api';
+import { useSignIn, useSignUp, useUser } from '@clerk/expo';
+import { devAuthEnabled, useApi } from '../src/lib/api';
 import { useHouseholds } from '../src/lib/households';
-import { colors } from '../src/components/ui';
+import {
+  Card,
+  Chip,
+  ErrorNote,
+  FadeSlideIn,
+  Field,
+  Loading,
+  Message,
+  PressableScale,
+  colors,
+  fonts,
+  radius,
+  shadow,
+  space,
+  styles,
+} from '../src/components/design-system';
+import { BrandLogo } from '../src/components/BrandLogo';
+import { Mascot, MascotState } from '../src/components/Mascot';
 import { MemberShell } from '../src/screens/MemberShell';
 import { CookShell } from '../src/screens/CookShell';
+import { Text, TextInput } from '../src/components/Typography';
+import { identifyAnalyticsUser, resetAnalyticsUser } from '../src/lib/analytics';
+
+const DESIGN_PREVIEW_HOUSEHOLD = {
+  id: 'preview-household',
+  name: 'Sharma Home',
+  role: 'member',
+  servingCount: 4,
+  mealStyle: 'north',
+  dietStyle: 'vegetarian',
+  defaultLanguage: 'en',
+} as const;
+
+const SELECTED_ACCESSIBILITY_STATE = { selected: true } as const;
+const UNSELECTED_ACCESSIBILITY_STATE = { selected: false } as const;
+const EXPANDED_ACCESSIBILITY_STATE = { expanded: true } as const;
+const COLLAPSED_ACCESSIBILITY_STATE = { expanded: false } as const;
+const DISABLED_ACCESSIBILITY_STATE = { disabled: true } as const;
 
 /**
  * Cooklink entry (issue 03 — role-aware navigation).
@@ -30,18 +57,84 @@ import { CookShell } from '../src/screens/CookShell';
  * the token so the recipient can accept without re-tapping the WhatsApp link.
  */
 export default function Home() {
+  const designPreview = process.env.EXPO_PUBLIC_COOKLINK_DESIGN_PREVIEW;
+  if (__DEV__ && designPreview === 'onboarding') {
+    return <OnboardingConversionPreview />;
+  }
+  if (__DEV__ && designPreview === 'true') {
+    return <MemberShell household={DESIGN_PREVIEW_HOUSEHOLD} />;
+  }
+  return <AuthenticatedHome />;
+}
+
+function OnboardingConversionPreview() {
+  const router = useRouter();
+  const [ownerSetup, setOwnerSetup] = useState(false);
+  const [complete, setComplete] = useState(false);
+  const startOwnerSetup = useCallback(() => setOwnerSetup(true), []);
+  const cancelOwnerSetup = useCallback(() => setOwnerSetup(false), []);
+  const openInvite = useCallback(
+    (expectedRole: 'member' | 'cook') => router.push(`/invite?expected_role=${expectedRole}`),
+    [router],
+  );
+  const createPreviewHousehold = useCallback(async (): Promise<HouseholdCreationResult> => {
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    return { householdId: 'preview-household', mealCount: 21 };
+  }, []);
+  const finishPreview = useCallback(async () => setComplete(true), []);
+
+  if (complete) {
+    return (
+      <View testID="onboarding-complete-screen" style={appStyles.root}>
+        <MascotState
+          title="Your first week is ready"
+          body="21 meals are active. You can adjust any meal from the plan."
+          say="Ready!"
+        />
+      </View>
+    );
+  }
+
+  return ownerSetup ? (
+    <OwnerOnboarding
+      onCreated={finishPreview}
+      onCancel={cancelOwnerSetup}
+      createHouseholdRequest={createPreviewHousehold}
+    />
+  ) : (
+    <NoHouseholds onStart={startOwnerSetup} onAcceptInvite={openInvite} />
+  );
+}
+
+function AuthenticatedHome() {
   const { isLoaded, isSignedIn, user } = useUser();
   const router = useRouter();
   const params = useLocalSearchParams<{ pending_invite_token?: string }>();
 
+  useEffect(() => {
+    if (devAuthEnabled) {
+      identifyAnalyticsUser(
+        process.env.EXPO_PUBLIC_COOKLINK_DEV_USER_ID ?? 'cooklink-mobile-dev-owner',
+      );
+      return;
+    }
+    if (!isLoaded) return;
+    if (isSignedIn && user) identifyAnalyticsUser(user.id);
+    else resetAnalyticsUser();
+  }, [isLoaded, isSignedIn, user]);
+
   // After OTP completes, carry the preserved invite token back to /invite so
   // the recipient can accept in one continuous flow.
   useEffect(() => {
-    if (isSignedIn && params.pending_invite_token) {
+    if ((isSignedIn || devAuthEnabled) && params.pending_invite_token) {
       router.replace(`/invite?token=${encodeURIComponent(params.pending_invite_token)}`);
     }
   }, [isSignedIn, params.pending_invite_token, router]);
 
+  if (devAuthEnabled) {
+    if (params.pending_invite_token) return <Loading />;
+    return <HouseholdApp />;
+  }
   if (!isLoaded) return <Loading />;
   if (!isSignedIn || !user) return <PhoneOtp />;
   // While the redirect effect runs, show a loader instead of briefly
@@ -51,35 +144,30 @@ export default function Home() {
 }
 
 function PhoneOtp() {
-  const signIn = useSignIn();
-  const signUp = useSignUp();
+  const { signIn, fetchStatus: signInStatus } = useSignIn();
+  const { signUp, fetchStatus: signUpStatus } = useSignUp();
   const [phone, setPhone] = useState('');
   const [code, setCode] = useState('');
   const [pending, setPending] = useState(false);
   const [mode, setMode] = useState<'signIn' | 'signUp'>('signIn');
   const [error, setError] = useState<string | null>(null);
+  const isFetching = signInStatus === 'fetching' || signUpStatus === 'fetching';
 
   async function startOtp() {
     setError(null);
     try {
       if (mode === 'signIn') {
-        const attempt = await signIn.signIn?.create({ identifier: phone });
-        const phoneFactor = attempt?.supportedFirstFactors?.find(
-          (factor) => factor.strategy === 'phone_code',
-        );
-        if (!phoneFactor || !('phoneNumberId' in phoneFactor))
-          throw new Error('Phone OTP is not enabled for this account.');
-        await signIn.signIn?.prepareFirstFactor({
-          strategy: 'phone_code',
-          phoneNumberId: phoneFactor.phoneNumberId,
-        });
+        const { error: sendError } = await signIn.phoneCode.sendCode({ phoneNumber: phone });
+        if (sendError) throw sendError;
       } else {
-        await signUp.signUp?.create({ phoneNumber: phone });
-        await signUp.signUp?.preparePhoneNumberVerification({ strategy: 'phone_code' });
+        const { error: createError } = await signUp.create({ phoneNumber: phone });
+        if (createError) throw createError;
+        const { error: sendError } = await signUp.verifications.sendPhoneCode();
+        if (sendError) throw sendError;
       }
       setPending(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not send the code.');
+      setError(readableAuthError(err, 'Could not send the code.'));
     }
   }
 
@@ -87,61 +175,155 @@ function PhoneOtp() {
     setError(null);
     try {
       if (mode === 'signIn') {
-        const result = await signIn.signIn?.attemptFirstFactor({ strategy: 'phone_code', code });
-        if (result?.status === 'complete')
-          await signIn.setActive?.({ session: result.createdSessionId });
+        const { error: verifyError } = await signIn.phoneCode.verifyCode({ code });
+        if (verifyError) throw verifyError;
+        if (signIn.status === 'complete') {
+          const { error: finalizeError } = await signIn.finalize();
+          if (finalizeError) throw finalizeError;
+        }
       } else {
-        const result = await signUp.signUp?.attemptPhoneNumberVerification({ code });
-        if (result?.status === 'complete')
-          await signUp.setActive?.({ session: result.createdSessionId });
+        const { error: verifyError } = await signUp.verifications.verifyPhoneCode({ code });
+        if (verifyError) throw verifyError;
+        if (signUp.status === 'complete') {
+          const { error: finalizeError } = await signUp.finalize();
+          if (finalizeError) throw finalizeError;
+        }
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'The code was not accepted.');
+      setError(readableAuthError(err, 'The code was not accepted.'));
     }
   }
 
-  return (
-    <View style={styles.centerScreen}>
-      <Text style={styles.title}>Cooklink</Text>
-      <Text style={styles.subtitle}>
-        Sign in with the phone number tied to your household invite.
-      </Text>
-      <View style={styles.segment}>
-        <Pressable
-          style={[styles.segmentButton, mode === 'signIn' && styles.segmentActive]}
-          onPress={() => setMode('signIn')}
-        >
-          <Text style={styles.segmentText}>Sign in</Text>
-        </Pressable>
-        <Pressable
-          style={[styles.segmentButton, mode === 'signUp' && styles.segmentActive]}
-          onPress={() => setMode('signUp')}
-        >
-          <Text style={styles.segmentText}>Create account</Text>
-        </Pressable>
-      </View>
-      <TextInput
-        style={styles.input}
-        placeholder="+91 phone number"
-        keyboardType="phone-pad"
-        value={phone}
-        onChangeText={setPhone}
-      />
-      {pending ? (
-        <TextInput
-          style={styles.input}
-          placeholder="OTP code"
-          keyboardType="number-pad"
-          value={code}
-          onChangeText={setCode}
-        />
-      ) : null}
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-      <Pressable style={styles.primaryButton} onPress={pending ? verifyOtp : startOtp}>
-        <Text style={styles.primaryButtonText}>{pending ? 'Verify code' : 'Send code'}</Text>
-      </Pressable>
-    </View>
+  const switchMode = useCallback(
+    (next: 'signIn' | 'signUp') => {
+      setMode(next);
+      setPending(false);
+      setCode('');
+      setError(null);
+      if (next === 'signIn') void signUp.reset();
+      else void signIn.reset();
+    },
+    [signIn, signUp],
   );
+  const switchToSignIn = useCallback(() => switchMode('signIn'), [switchMode]);
+  const switchToSignUp = useCallback(() => switchMode('signUp'), [switchMode]);
+
+  return (
+    <ScrollView
+      contentContainerStyle={auth.scroll}
+      keyboardShouldPersistTaps="handled"
+      showsVerticalScrollIndicator={false}
+    >
+      {/* Chotu greets first — the app has a face before it asks for a phone number. */}
+      <FadeSlideIn>
+        <View style={auth.hero}>
+          <Mascot size={162} say="Namaste!" />
+        </View>
+      </FadeSlideIn>
+
+      <FadeSlideIn delay={110}>
+        <View style={auth.intro}>
+          <BrandLogo />
+          <Text style={auth.tagline}>
+            One kitchen, one plan. Shared by your household and your cook.
+          </Text>
+        </View>
+      </FadeSlideIn>
+
+      <FadeSlideIn delay={190}>
+        <Card style={auth.card}>
+          <View style={styles.segment}>
+            <PressableScale
+              accessibilityRole="button"
+              accessibilityLabel="Sign in"
+              accessibilityState={
+                mode === 'signIn' ? SELECTED_ACCESSIBILITY_STATE : UNSELECTED_ACCESSIBILITY_STATE
+              }
+              style={mode === 'signIn' ? SEGMENT_BUTTON_ACTIVE_STYLE : styles.segmentButton}
+              disabled={isFetching}
+              onPress={switchToSignIn}
+            >
+              <Text style={mode === 'signIn' ? SEGMENT_TEXT_ACTIVE_STYLE : styles.segmentText}>
+                Sign in
+              </Text>
+            </PressableScale>
+            <PressableScale
+              accessibilityRole="button"
+              accessibilityLabel="Create account"
+              accessibilityState={
+                mode === 'signUp' ? SELECTED_ACCESSIBILITY_STATE : UNSELECTED_ACCESSIBILITY_STATE
+              }
+              style={mode === 'signUp' ? SEGMENT_BUTTON_ACTIVE_STYLE : styles.segmentButton}
+              disabled={isFetching}
+              onPress={switchToSignUp}
+            >
+              <Text style={mode === 'signUp' ? SEGMENT_TEXT_ACTIVE_STYLE : styles.segmentText}>
+                Create account
+              </Text>
+            </PressableScale>
+          </View>
+
+          <Field
+            label="Phone number"
+            hint={pending ? undefined : 'Use the number your household invite was sent to.'}
+          >
+            <TextInput
+              accessibilityLabel="Phone number"
+              style={styles.input}
+              placeholder="+91 00000 00000"
+              placeholderTextColor={colors.inkSoft}
+              keyboardType="phone-pad"
+              value={phone}
+              onChangeText={setPhone}
+            />
+          </Field>
+
+          {pending ? (
+            <FadeSlideIn from={10}>
+              <Field label="Verification code" hint="We sent a six-digit code by SMS.">
+                <TextInput
+                  accessibilityLabel="Verification code"
+                  style={CODE_INPUT_STYLE}
+                  placeholder="······"
+                  placeholderTextColor={colors.inkSoft}
+                  keyboardType="number-pad"
+                  value={code}
+                  onChangeText={setCode}
+                />
+              </Field>
+            </FadeSlideIn>
+          ) : null}
+
+          {mode === 'signUp' ? <View nativeID="clerk-captcha" /> : null}
+          {error ? <ErrorNote>{error}</ErrorNote> : null}
+
+          <PressableScale
+            accessibilityRole="button"
+            accessibilityLabel={pending ? 'Verify code' : 'Send code'}
+            style={isFetching ? DISABLED_PRIMARY_BUTTON_STYLE : styles.primaryButton}
+            disabled={isFetching}
+            onPress={pending ? verifyOtp : startOtp}
+          >
+            <Text style={styles.primaryButtonText}>
+              {isFetching ? 'Just a moment…' : pending ? 'Verify code' : 'Send code'}
+            </Text>
+          </PressableScale>
+        </Card>
+      </FadeSlideIn>
+    </ScrollView>
+  );
+}
+
+function readableAuthError(error: unknown, fallback: string): string {
+  if (
+    error &&
+    typeof error === 'object' &&
+    'longMessage' in error &&
+    typeof error.longMessage === 'string'
+  ) {
+    return error.longMessage;
+  }
+  return error instanceof Error ? error.message : fallback;
 }
 
 function HouseholdApp() {
@@ -158,22 +340,25 @@ function HouseholdApp() {
   } = useHouseholds();
   const router = useRouter();
   const [onboarding, setOnboarding] = useState(false);
+  const cancelOnboarding = useCallback(() => setOnboarding(false), []);
+  const startOnboarding = useCallback(() => setOnboarding(true), []);
+  const acceptInvite = useCallback(
+    (expectedRole: 'member' | 'cook') => router.push(`/invite?expected_role=${expectedRole}`),
+    [router],
+  );
+  const profileRequired = error?.includes('profile_required') ?? false;
 
   // A profile_required error means the person has no Clerk user row yet; the
   // server creates it lazily. A no-households state offers the owner onboarding
   // path AND the invite-acceptance path (issue 03 — a Member or Cook lands here
   // with zero households until they accept their WhatsApp invite).
-  if (error?.includes('profile_required')) return <OwnerOnboarding onCreated={loadHouseholds} />;
-  if (error) return <Message title="Could not load Cooklink" body={error} />;
-  if (!households) return <Loading />;
-  if (households.length === 0) {
+  if (error && !profileRequired) return <Message title="Could not load Cooklink" body={error} />;
+  if (!profileRequired && !households) return <Loading label="Opening your kitchen" />;
+  if (profileRequired || households?.length === 0) {
     return onboarding ? (
-      <OwnerOnboarding onCreated={loadHouseholds} onCancel={() => setOnboarding(false)} />
+      <OwnerOnboarding onCreated={loadHouseholds} onCancel={cancelOnboarding} />
     ) : (
-      <NoHouseholds
-        onStart={() => setOnboarding(true)}
-        onAcceptInvite={() => router.push('/invite')}
-      />
+      <NoHouseholds onStart={startOnboarding} onAcceptInvite={acceptInvite} />
     );
   }
 
@@ -189,7 +374,7 @@ function HouseholdApp() {
   }
 
   return (
-    <View style={{ flex: 1 }}>
+    <View style={appStyles.root}>
       {hasBoth ? (
         <AreaSwitcher
           area={area}
@@ -227,34 +412,91 @@ function AreaSwitcher({
 }) {
   return (
     <View style={areaStyles.bar}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityState={{ selected: area === 'home' }}
-        style={[areaStyles.tab, area === 'home' && areaStyles.tabActive]}
-        onPress={() => onChange('home')}
-      >
-        <Text style={areaStyles.label}>My home</Text>
-        <Text style={areaStyles.count}>{homeCount}</Text>
-      </Pressable>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityState={{ selected: area === 'work' }}
-        style={[areaStyles.tab, area === 'work' && areaStyles.tabActive]}
-        onPress={() => onChange('work')}
-      >
-        <Text style={areaStyles.label}>Work</Text>
-        <Text style={areaStyles.count}>{workCount}</Text>
-      </Pressable>
+      <View style={styles.segment}>
+        {(
+          [
+            ['home', 'My home', homeCount],
+            ['work', 'Work', workCount],
+          ] as const
+        ).map(([key, label, count]) => (
+          <AreaSwitchTab
+            key={key}
+            areaKey={key}
+            label={label}
+            count={count}
+            selected={area === key}
+            onChange={onChange}
+          />
+        ))}
+      </View>
     </View>
   );
 }
 
+function AreaSwitchTab({
+  areaKey,
+  label,
+  count,
+  selected,
+  onChange,
+}: {
+  areaKey: 'home' | 'work';
+  label: string;
+  count: number;
+  selected: boolean;
+  onChange: (next: 'home' | 'work') => void;
+}) {
+  const selectArea = useCallback(() => onChange(areaKey), [areaKey, onChange]);
+
+  return (
+    <PressableScale
+      accessibilityRole="button"
+      accessibilityLabel={`${label}, ${count} households`}
+      accessibilityState={selected ? SELECTED_ACCESSIBILITY_STATE : UNSELECTED_ACCESSIBILITY_STATE}
+      style={selected ? AREA_TAB_ACTIVE_STYLE : AREA_TAB_STYLE}
+      onPress={selectArea}
+    >
+      <Text style={selected ? SEGMENT_TEXT_ACTIVE_STYLE : styles.segmentText}>{label}</Text>
+      <Chip
+        label={String(count)}
+        tint={selected ? colors.accentSoft : colors.field}
+        ink={selected ? colors.accent : colors.inkSoft}
+      />
+    </PressableScale>
+  );
+}
+
+const MEAL_STYLES = [
+  { value: 'north', label: 'North Indian', glyph: '🫓', note: 'Roti, sabzi, dal' },
+  { value: 'south', label: 'South Indian', glyph: '🍛', note: 'Rice, sambar, poriyal' },
+] as const;
+
+const DIET_STYLES = [
+  { value: 'vegetarian', label: 'Veg', glyph: '🥬' },
+  { value: 'eggetarian', label: 'Egg', glyph: '🥚' },
+  { value: 'nonvegetarian', label: 'Non-veg', glyph: '🍗' },
+] as const;
+
+type HouseholdCreationInput = {
+  name: string;
+  servingCount: number;
+  mealStyle: 'north' | 'south';
+  dietStyle: 'vegetarian' | 'eggetarian' | 'nonvegetarian';
+};
+
+type HouseholdCreationResult = {
+  householdId: string;
+  mealCount: number;
+};
+
 function OwnerOnboarding({
   onCreated,
   onCancel,
+  createHouseholdRequest,
 }: {
   onCreated: () => Promise<unknown>;
   onCancel?: () => void;
+  createHouseholdRequest?: (input: HouseholdCreationInput) => Promise<HouseholdCreationResult>;
 }) {
   const api = useApi();
   const [name, setName] = useState('My Home');
@@ -263,23 +505,41 @@ function OwnerOnboarding({
   const [dietStyle, setDietStyle] = useState<'vegetarian' | 'eggetarian' | 'nonvegetarian'>(
     'vegetarian',
   );
+  const [showPersonalization, setShowPersonalization] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const parsedServingCount = Number(servingCount);
+  const canCreate =
+    name.trim().length > 0 &&
+    Number.isInteger(parsedServingCount) &&
+    parsedServingCount > 0 &&
+    parsedServingCount <= 20;
+  const togglePersonalization = useCallback(
+    () => setShowPersonalization((visible) => !visible),
+    [],
+  );
 
-  async function createHousehold() {
+  const createHousehold = useCallback(async () => {
+    if (!canCreate) {
+      setMessage('Add a household name and use a diner count from 1 to 20.');
+      return;
+    }
     setBusy(true);
-    setMessage('Building your first seven-day meal plan...');
+    setMessage('Building your first seven-day meal plan…');
     const startedAt = Date.now();
     try {
-      const result = await api<{ householdId: string; mealCount: number }>('/v1/households', {
-        method: 'POST',
-        body: JSON.stringify({
-          name,
-          servingCount: Number(servingCount),
-          mealStyle,
-          dietStyle,
-        }),
-      });
+      const input: HouseholdCreationInput = {
+        name: name.trim(),
+        servingCount: parsedServingCount,
+        mealStyle,
+        dietStyle,
+      };
+      const result = createHouseholdRequest
+        ? await createHouseholdRequest(input)
+        : await api<HouseholdCreationResult>('/v1/households', {
+            method: 'POST',
+            body: JSON.stringify(input),
+          });
       const elapsed = Math.round((Date.now() - startedAt) / 1000);
       setMessage(`${result.mealCount} meals active in ${elapsed}s.`);
       await onCreated();
@@ -288,80 +548,241 @@ function OwnerOnboarding({
     } finally {
       setBusy(false);
     }
+  }, [
+    api,
+    canCreate,
+    createHouseholdRequest,
+    dietStyle,
+    mealStyle,
+    name,
+    onCreated,
+    parsedServingCount,
+  ]);
+
+  // The generation wait is the one moment worth a whole screen: Chotu at work
+  // while the week is built reads as progress, not as a stalled request.
+  if (busy) {
+    return (
+      <MascotState
+        title="Cooking up your week"
+        body={message ?? undefined}
+        say="About 15 seconds!"
+      />
+    );
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.screen}>
-      <Text style={styles.eyebrow}>Owner setup</Text>
-      <Text style={styles.title}>Start your household</Text>
-      <TextInput
-        style={styles.input}
-        value={name}
-        onChangeText={setName}
-        placeholder="Household name"
-      />
-      <TextInput
-        style={styles.input}
-        value={servingCount}
-        onChangeText={setServingCount}
-        placeholder="Servings"
-        keyboardType="number-pad"
-      />
-      <View style={styles.segment}>
-        <Pressable
-          style={[styles.segmentButton, mealStyle === 'north' && styles.segmentActive]}
-          onPress={() => setMealStyle('north')}
-        >
-          <Text style={styles.segmentText}>North Indian</Text>
-        </Pressable>
-        <Pressable
-          style={[styles.segmentButton, mealStyle === 'south' && styles.segmentActive]}
-          onPress={() => setMealStyle('south')}
-        >
-          <Text style={styles.segmentText}>South Indian</Text>
-        </Pressable>
-      </View>
-      <Text style={styles.sectionTitle}>Food preference</Text>
-      <View style={styles.segment}>
-        {(
-          [
-            ['vegetarian', 'Veg'],
-            ['eggetarian', 'Egg'],
-            ['nonvegetarian', 'Non-veg'],
-          ] as const
-        ).map(([value, label]) => (
-          <Pressable
-            key={value}
-            style={[styles.segmentButton, dietStyle === value && styles.segmentActive]}
-            onPress={() => setDietStyle(value)}
+    <ScrollView
+      testID="owner-onboarding-screen"
+      contentContainerStyle={onboard.scroll}
+      keyboardShouldPersistTaps="handled"
+      showsVerticalScrollIndicator={false}
+    >
+      <FadeSlideIn>
+        <View style={onboard.head}>
+          <Mascot size={104} withPet={false} />
+          <View style={onboard.headText}>
+            <Text style={styles.eyebrow}>Step 2 of 2 · Owner setup</Text>
+            <Text style={onboard.title}>Your first week, ready in about 15 seconds</Text>
+            <Text style={styles.subtitle}>
+              Name your household and Cooklink will create an active seven-day meal plan.
+            </Text>
+          </View>
+        </View>
+      </FadeSlideIn>
+
+      <FadeSlideIn delay={90}>
+        <Card>
+          <Field label="Household name (required)" hint="“My Home” is ready—rename it if you like.">
+            <TextInput
+              accessibilityLabel="Household name, required"
+              style={styles.input}
+              value={name}
+              onChangeText={setName}
+              placeholder="My Home"
+              placeholderTextColor={colors.inkSoft}
+            />
+          </Field>
+        </Card>
+      </FadeSlideIn>
+
+      <FadeSlideIn delay={160}>
+        <Card style={onboard.defaultsCard}>
+          <View style={onboard.defaultsHead}>
+            <View style={onboard.defaultsCopy}>
+              <Text style={styles.eyebrow}>Starter choices</Text>
+              <Text style={onboard.defaultsTitle}>
+                {servingCount} diners · {mealStyle === 'north' ? 'North Indian' : 'South Indian'} ·{' '}
+                {dietStyle === 'vegetarian'
+                  ? 'Vegetarian'
+                  : dietStyle === 'eggetarian'
+                    ? 'Eggetarian'
+                    : 'Non-vegetarian'}
+              </Text>
+            </View>
+            <Chip label="Optional" tint={colors.oliveSoft} ink={colors.olive} />
+          </View>
+          <Text style={styles.subtitle}>
+            These defaults are enough to start. Personalize them now only if you want to.
+          </Text>
+          <PressableScale
+            testID="toggle-onboarding-personalization"
+            accessibilityRole="button"
+            accessibilityLabel={
+              showPersonalization
+                ? 'Hide optional personalization'
+                : 'Personalize before creating plan'
+            }
+            accessibilityState={
+              showPersonalization ? EXPANDED_ACCESSIBILITY_STATE : COLLAPSED_ACCESSIBILITY_STATE
+            }
+            style={styles.ghostButton}
+            onPress={togglePersonalization}
           >
-            <Text style={styles.segmentText}>{label}</Text>
-          </Pressable>
-        ))}
-      </View>
-      {message ? <Text style={styles.subtitle}>{message}</Text> : null}
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Create active meal plan"
-        style={[styles.primaryButton, busy && styles.disabled]}
-        disabled={busy}
-        onPress={createHousehold}
-      >
-        <Text style={styles.primaryButtonText}>
-          {busy ? 'Starting plan' : 'Create active meal plan'}
-        </Text>
-      </Pressable>
-      {onCancel ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Back to join choices"
-          style={styles.ghostButton}
-          onPress={onCancel}
-        >
-          <Text style={styles.ghostButtonText}>Back</Text>
-        </Pressable>
+            <Text style={styles.ghostButtonText}>
+              {showPersonalization ? 'Use these choices' : 'Personalize first (optional)'}
+            </Text>
+          </PressableScale>
+        </Card>
+      </FadeSlideIn>
+
+      {showPersonalization ? (
+        <FadeSlideIn delay={90}>
+          <View style={onboard.personalization}>
+            <Card>
+              <Field
+                label="Usual number of diners"
+                hint="Optional. You can override this on any single meal."
+              >
+                <TextInput
+                  accessibilityLabel="Serving count"
+                  style={styles.input}
+                  value={servingCount}
+                  onChangeText={setServingCount}
+                  placeholder="4"
+                  placeholderTextColor={colors.inkSoft}
+                  keyboardType="number-pad"
+                />
+              </Field>
+            </Card>
+
+            <Card>
+              <Field label="Meal style" hint="Optional. North Indian is selected by default.">
+                <View style={onboard.choiceRow}>
+                  {MEAL_STYLES.map((option) => (
+                    <MealStyleOption
+                      key={option.value}
+                      option={option}
+                      selected={mealStyle === option.value}
+                      onSelect={setMealStyle}
+                    />
+                  ))}
+                </View>
+              </Field>
+            </Card>
+
+            <Card>
+              <Field
+                label="Food preference"
+                hint="Optional. Guides planning; you can still swap in any meal."
+              >
+                <View style={onboard.choiceRow}>
+                  {DIET_STYLES.map((option) => (
+                    <DietStyleOption
+                      key={option.value}
+                      option={option}
+                      selected={dietStyle === option.value}
+                      onSelect={setDietStyle}
+                    />
+                  ))}
+                </View>
+              </Field>
+            </Card>
+          </View>
+        </FadeSlideIn>
       ) : null}
+
+      <FadeSlideIn delay={230}>
+        <View style={onboard.actions}>
+          {message ? <Text style={styles.subtitle}>{message}</Text> : null}
+          <PressableScale
+            testID="create-first-plan-button"
+            accessibilityRole="button"
+            accessibilityLabel="Create active meal plan"
+            accessibilityState={canCreate ? undefined : DISABLED_ACCESSIBILITY_STATE}
+            style={canCreate ? styles.primaryButton : DISABLED_PRIMARY_BUTTON_STYLE}
+            disabled={!canCreate}
+            onPress={createHousehold}
+          >
+            <Text style={styles.primaryButtonText}>Create my 7-day plan</Text>
+          </PressableScale>
+          <Text style={onboard.timeNote}>Usually ready in about 15 seconds.</Text>
+          {onCancel ? (
+            <PressableScale
+              accessibilityRole="button"
+              accessibilityLabel="Back to join choices"
+              style={styles.ghostButton}
+              onPress={onCancel}
+            >
+              <Text style={styles.ghostButtonText}>Back</Text>
+            </PressableScale>
+          ) : null}
+        </View>
+      </FadeSlideIn>
     </ScrollView>
+  );
+}
+
+function MealStyleOption({
+  option,
+  selected,
+  onSelect,
+}: {
+  option: (typeof MEAL_STYLES)[number];
+  selected: boolean;
+  onSelect: (value: (typeof MEAL_STYLES)[number]['value']) => void;
+}) {
+  const selectOption = useCallback(() => onSelect(option.value), [onSelect, option.value]);
+
+  return (
+    <PressableScale
+      accessibilityRole="button"
+      accessibilityLabel={option.label}
+      accessibilityState={selected ? SELECTED_ACCESSIBILITY_STATE : UNSELECTED_ACCESSIBILITY_STATE}
+      style={selected ? MEAL_CHOICE_ACTIVE_STYLE : onboard.choice}
+      onPress={selectOption}
+    >
+      <Text style={onboard.choiceGlyph}>{option.glyph}</Text>
+      <Text style={selected ? CHOICE_LABEL_ACTIVE_STYLE : onboard.choiceLabel}>{option.label}</Text>
+      <Text style={onboard.choiceNote}>{option.note}</Text>
+    </PressableScale>
+  );
+}
+
+function DietStyleOption({
+  option,
+  selected,
+  onSelect,
+}: {
+  option: (typeof DIET_STYLES)[number];
+  selected: boolean;
+  onSelect: (value: (typeof DIET_STYLES)[number]['value']) => void;
+}) {
+  const selectOption = useCallback(() => onSelect(option.value), [onSelect, option.value]);
+
+  return (
+    <PressableScale
+      accessibilityRole="button"
+      accessibilityLabel={option.label}
+      accessibilityState={selected ? SELECTED_ACCESSIBILITY_STATE : UNSELECTED_ACCESSIBILITY_STATE}
+      style={selected ? DIET_CHOICE_ACTIVE_STYLE : onboard.diet}
+      onPress={selectOption}
+    >
+      <Text style={onboard.dietGlyph}>{option.glyph}</Text>
+      <Text numberOfLines={1} style={selected ? DIET_LABEL_ACTIVE_STYLE : DIET_LABEL_STYLE}>
+        {option.label}
+      </Text>
+    </PressableScale>
   );
 }
 
@@ -376,119 +797,231 @@ function NoHouseholds({
   onAcceptInvite,
 }: {
   onStart: () => void;
-  onAcceptInvite: () => void;
+  onAcceptInvite: (expectedRole: 'member' | 'cook') => void;
 }) {
+  const joinAsMember = useCallback(() => onAcceptInvite('member'), [onAcceptInvite]);
+  const joinAsCook = useCallback(() => onAcceptInvite('cook'), [onAcceptInvite]);
+
   return (
-    <ScrollView contentContainerStyle={styles.screen}>
-      <Text style={styles.eyebrow}>Welcome</Text>
-      <Text style={styles.title}>Join Cooklink</Text>
-      <Text style={styles.subtitle}>
-        Start your own household, or accept an invite from someone who invited you.
+    <ScrollView
+      testID="role-first-screen"
+      contentContainerStyle={noHouse.scroll}
+      showsVerticalScrollIndicator={false}
+    >
+      <Mascot size={138} say="Namaste!" />
+      <Text style={noHouse.title}>How do you use Cooklink?</Text>
+      <Text style={noHouse.body}>
+        Choose one role. Cooklink will take you to the shortest setup for it.
       </Text>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Start a household"
-        style={styles.primaryButton}
-        onPress={onStart}
-      >
-        <Text style={styles.primaryButtonText}>Start a household</Text>
-      </Pressable>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Accept an invite"
-        style={styles.ghostButton}
-        onPress={onAcceptInvite}
-      >
-        <Text style={styles.ghostButtonText}>I have an invite</Text>
-      </Pressable>
+      <View style={noHouse.actions}>
+        <Text style={styles.eyebrow}>Step 1 of 2 · Choose your role</Text>
+        <PressableScale
+          testID="choose-owner-role"
+          accessibilityRole="button"
+          accessibilityLabel="Household owner, set up my home"
+          style={noHouse.roleChoicePrimary}
+          onPress={onStart}
+        >
+          <View style={noHouse.roleCopy}>
+            <Text style={noHouse.roleTitlePrimary}>Household owner</Text>
+            <Text style={noHouse.roleNotePrimary}>
+              Set up my home and create its first meal plan
+            </Text>
+          </View>
+          <Text style={noHouse.roleArrowPrimary}>→</Text>
+        </PressableScale>
+        <PressableScale
+          testID="choose-member-role"
+          accessibilityRole="button"
+          accessibilityLabel="Household member, join with an invite"
+          style={noHouse.roleChoice}
+          onPress={joinAsMember}
+        >
+          <View style={noHouse.roleCopy}>
+            <Text style={noHouse.roleTitle}>Household member</Text>
+            <Text style={noHouse.roleNote}>Join my household with its WhatsApp invite</Text>
+          </View>
+          <Text style={noHouse.roleArrow}>→</Text>
+        </PressableScale>
+        <PressableScale
+          testID="choose-cook-role"
+          accessibilityRole="button"
+          accessibilityLabel="Hired cook, join work households"
+          style={noHouse.roleChoice}
+          onPress={joinAsCook}
+        >
+          <View style={noHouse.roleCopy}>
+            <Text style={noHouse.roleTitle}>Hired cook</Text>
+            <Text style={noHouse.roleNote}>Join the homes I cook for with an invite</Text>
+          </View>
+          <Text style={noHouse.roleArrow}>→</Text>
+        </PressableScale>
+      </View>
     </ScrollView>
   );
 }
 
-function Loading() {
-  return (
-    <View style={styles.centerScreen}>
-      <ActivityIndicator />
-    </View>
-  );
-}
-
-function Message({ title, body }: { title: string; body: string }) {
-  return (
-    <View style={styles.centerScreen}>
-      <Text style={styles.title}>{title}</Text>
-      <Text style={styles.subtitle}>{body}</Text>
-    </View>
-  );
-}
-
-const styles = StyleSheet.create({
-  screen: { flexGrow: 1, padding: 24, paddingTop: 56, backgroundColor: colors.surface, gap: 16 },
-  centerScreen: {
-    flex: 1,
-    padding: 24,
+const auth = StyleSheet.create({
+  scroll: {
+    flexGrow: 1,
     justifyContent: 'center',
+    paddingHorizontal: space.xl,
+    paddingVertical: space.xxl,
     backgroundColor: colors.surface,
-    gap: 16,
+    gap: space.lg,
   },
-  eyebrow: { fontSize: 13, fontWeight: '700', color: colors.brand, textTransform: 'uppercase' },
-  title: { fontSize: 34, fontWeight: '700', color: colors.ink },
-  sectionTitle: { fontSize: 18, fontWeight: '700', color: colors.ink, marginTop: 8 },
-  subtitle: { fontSize: 16, lineHeight: 22, color: colors.inkSoft },
-  input: {
-    borderWidth: 1,
-    borderColor: '#c8d0c8',
-    borderRadius: 8,
-    padding: 14,
-    fontSize: 18,
-    backgroundColor: '#fff',
+  hero: { alignItems: 'center' },
+  intro: { alignItems: 'center', gap: space.sm },
+  tagline: {
+    fontSize: 15,
+    lineHeight: 21,
+    color: colors.inkSoft,
+    textAlign: 'center',
+    maxWidth: 280,
   },
-  primaryButton: {
-    borderRadius: 8,
-    padding: 16,
-    backgroundColor: colors.accent,
-    alignItems: 'center',
+  card: { gap: space.lg, padding: space.xl },
+  codeInput: { fontSize: 24, letterSpacing: 8, textAlign: 'center' },
+});
+
+const onboard = StyleSheet.create({
+  scroll: {
+    flexGrow: 1,
+    paddingHorizontal: space.xl,
+    paddingTop: 56,
+    paddingBottom: space.xxl,
+    backgroundColor: colors.surface,
+    gap: space.md,
   },
-  primaryButtonText: { color: '#fff', fontSize: 17, fontWeight: '700' },
-  ghostButton: {
-    borderRadius: 8,
-    padding: 14,
-    backgroundColor: colors.field,
-    alignItems: 'center',
+  head: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  headText: { flex: 1, gap: space.xs },
+  title: {
+    fontFamily: fonts.display,
+    fontSize: 30,
+    lineHeight: 35,
+    fontWeight: '700',
+    color: colors.ink,
+    letterSpacing: -0.3,
   },
-  ghostButtonText: { color: colors.ink, fontSize: 16, fontWeight: '700' },
-  disabled: { opacity: 0.7 },
-  segment: { flexDirection: 'row', gap: 8 },
-  segmentButton: {
+  choiceRow: { flexDirection: 'row', gap: space.sm },
+  choice: {
     flex: 1,
-    borderRadius: 8,
-    padding: 12,
-    alignItems: 'center',
-    backgroundColor: colors.field,
+    minHeight: 44,
+    gap: 2,
+    borderRadius: radius.md,
+    borderWidth: 2,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    paddingVertical: space.md,
+    paddingHorizontal: space.md,
   },
-  segmentActive: { backgroundColor: colors.accentSoft },
-  segmentText: { color: colors.ink, fontWeight: '700' },
-  error: { color: colors.danger },
+  choiceOn: { borderColor: colors.accent, backgroundColor: colors.accentSoft, ...shadow.soft },
+  choiceGlyph: { fontSize: 22 },
+  choiceLabel: { fontSize: 15, fontWeight: '700', color: colors.ink },
+  choiceLabelOn: { color: colors.accent },
+  choiceNote: { fontSize: 12, color: colors.inkSoft, lineHeight: 16 },
+  diet: {
+    flex: 1,
+    minHeight: 44,
+    alignItems: 'center',
+    gap: space.xs,
+    borderRadius: radius.md,
+    borderWidth: 2,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    paddingVertical: space.md,
+  },
+  dietGlyph: { fontSize: 20 },
+  dietLabel: { fontSize: 14 },
+  actions: { gap: space.md },
+  defaultsCard: { gap: space.md },
+  defaultsHead: { flexDirection: 'row', alignItems: 'flex-start', gap: space.sm },
+  defaultsCopy: { flex: 1, gap: space.xs },
+  defaultsTitle: { fontSize: 16, lineHeight: 22, fontWeight: '700', color: colors.ink },
+  personalization: { gap: space.md },
+  timeNote: { fontSize: 13, color: colors.inkSoft, textAlign: 'center' },
+});
+
+const noHouse = StyleSheet.create({
+  scroll: {
+    flexGrow: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: space.xl,
+    paddingTop: 48,
+    paddingBottom: space.xxl,
+    gap: space.md,
+    backgroundColor: colors.surface,
+  },
+  title: {
+    fontFamily: fonts.display,
+    fontSize: 30,
+    lineHeight: 36,
+    fontWeight: '700',
+    color: colors.ink,
+    textAlign: 'center',
+  },
+  body: {
+    fontSize: 16,
+    lineHeight: 23,
+    color: colors.inkSoft,
+    textAlign: 'center',
+    maxWidth: 320,
+  },
+  actions: { alignSelf: 'stretch', gap: space.md, marginTop: space.sm },
+  roleChoice: {
+    minHeight: 72,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.md,
+    borderRadius: radius.md,
+    borderWidth: 2,
+    borderColor: colors.border,
+    backgroundColor: colors.card,
+    padding: space.lg,
+  },
+  roleChoicePrimary: {
+    minHeight: 72,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.md,
+    borderRadius: radius.md,
+    borderWidth: 2,
+    borderColor: colors.accent,
+    backgroundColor: colors.accent,
+    padding: space.lg,
+    ...shadow.soft,
+  },
+  roleCopy: { flex: 1, gap: space.xs },
+  roleTitle: { fontSize: 16, fontWeight: '800', color: colors.ink },
+  roleTitlePrimary: { fontSize: 16, fontWeight: '800', color: colors.card },
+  roleNote: { fontSize: 13, lineHeight: 18, color: colors.inkSoft },
+  roleNotePrimary: { fontSize: 13, lineHeight: 18, color: colors.card },
+  roleArrow: { fontSize: 22, color: colors.accent },
+  roleArrowPrimary: { fontSize: 22, color: colors.card },
 });
 
 const areaStyles = StyleSheet.create({
   bar: {
-    flexDirection: 'row',
-    backgroundColor: colors.card,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    paddingHorizontal: space.xl,
+    paddingTop: 56,
+    paddingBottom: space.sm,
+    backgroundColor: colors.surface,
   },
-  tab: {
-    flex: 1,
-    paddingVertical: 14,
-    alignItems: 'center',
-    gap: 2,
-    minHeight: 56,
-  },
-  tabActive: {
-    borderBottomWidth: 3,
-    borderBottomColor: colors.accent,
-  },
-  label: { fontSize: 15, fontWeight: '700', color: colors.ink },
-  count: { fontSize: 12, color: colors.inkSoft },
+  tab: { flexDirection: 'row', gap: space.sm },
 });
+
+const appStyles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: colors.surface },
+});
+
+const SEGMENT_BUTTON_ACTIVE_STYLE = [styles.segmentButton, styles.segmentActive];
+const SEGMENT_TEXT_ACTIVE_STYLE = [styles.segmentText, styles.segmentTextActive];
+const CODE_INPUT_STYLE = [styles.input, auth.codeInput];
+const DISABLED_PRIMARY_BUTTON_STYLE = [styles.primaryButton, styles.disabled];
+const AREA_TAB_STYLE = [styles.segmentButton, areaStyles.tab];
+const AREA_TAB_ACTIVE_STYLE = [styles.segmentButton, areaStyles.tab, styles.segmentActive];
+const MEAL_CHOICE_ACTIVE_STYLE = [onboard.choice, onboard.choiceOn];
+const CHOICE_LABEL_ACTIVE_STYLE = [onboard.choiceLabel, onboard.choiceLabelOn];
+const DIET_CHOICE_ACTIVE_STYLE = [onboard.diet, onboard.choiceOn];
+const DIET_LABEL_STYLE = [onboard.choiceLabel, onboard.dietLabel];
+const DIET_LABEL_ACTIVE_STYLE = [onboard.choiceLabel, onboard.dietLabel, onboard.choiceLabelOn];

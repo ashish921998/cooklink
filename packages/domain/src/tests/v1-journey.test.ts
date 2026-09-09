@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { id, type RecipeId } from '../ids.js';
+import { brandId, type RecipeId } from '../ids.js';
 import {
   Authorization,
   InMemoryRepository,
@@ -13,7 +13,7 @@ import {
   cancellationGuidance,
   can,
 } from '../index.js';
-import type { Recipe } from '../types.js';
+import type { Recipe } from '../domain-types.js';
 
 /**
  * Issue 13, AC#1 — the end-to-end V1 journey proven at the domain layer.
@@ -43,7 +43,7 @@ function makeHousehold() {
 }
 
 const recipeDalTadka: Recipe = {
-  id: id<'RecipeId'>('r-dal-tadka'),
+  id: brandId<'RecipeId'>('r-dal-tadka'),
   name: 'Dal Tadka',
   nameHi: 'दाल तड़का',
   baseServings: 4,
@@ -79,7 +79,7 @@ test('AC#1: the full V1 Owner-to-checkout journey', async () => {
 
   // ---- Owner creates Household ----
   const owner = await repo.createUser({
-    id: id<'UserId'>('u-owner'),
+    id: brandId<'UserId'>('u-owner'),
     clerkUserId: 'owner-clerk',
     phone: '+919000000001',
     displayName: 'Meera',
@@ -110,7 +110,7 @@ test('AC#1: the full V1 Owner-to-checkout journey', async () => {
 
   // ---- Cook joins ----
   const cookUser = await repo.createUser({
-    id: id<'UserId'>('u-cook'),
+    id: brandId<'UserId'>('u-cook'),
     clerkUserId: 'cook-clerk',
     phone: '+919000000002',
     displayName: 'Raju',
@@ -273,14 +273,14 @@ test('AC#1: a Cook is denied checkout and cart edit capabilities', async () => {
   const auth = new Authorization(repo);
 
   const owner = await repo.createUser({
-    id: id<'UserId'>('u-owner2'),
+    id: brandId<'UserId'>('u-owner2'),
     clerkUserId: 'owner2-clerk',
     phone: '+919000000003',
     displayName: 'Owner2',
   });
   const { household } = await repo.createHousehold(makeHousehold(), owner.id);
   const cookUser = await repo.createUser({
-    id: id<'UserId'>('u-cook2'),
+    id: brandId<'UserId'>('u-cook2'),
     clerkUserId: 'cook2-clerk',
     phone: '+919000000004',
     displayName: 'Cook2',

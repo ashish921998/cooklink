@@ -1,5 +1,5 @@
 import type { ChatMessageId, MembershipId } from './ids.js';
-import type { ChatMessage } from './types.js';
+import type { ChatMessage } from './domain-types.js';
 
 /**
  * Human-message lifecycle policy (issue 06 — Send, edit, and delete lifecycle).

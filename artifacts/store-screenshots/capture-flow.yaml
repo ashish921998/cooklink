@@ -1,0 +1,16 @@
+appId: com.cooklink.app
+---
+- launchApp:
+    clearState: false
+- assertVisible: 'Today'
+- takeScreenshot: 'artifacts/store-screenshots/raw/01-today'
+- tapOn: 'Meal Plan'
+- waitForAnimationToEnd
+- takeScreenshot: 'artifacts/store-screenshots/raw/02-meal-plan'
+- tapOn: 'lunch Dal Tadka'
+- waitForAnimationToEnd
+- takeScreenshot: 'artifacts/store-screenshots/raw/04-recipe-guide'
+- tapOn: 'Back to meal plan'
+- tapOn: 'Groceries'
+- waitForAnimationToEnd
+- takeScreenshot: 'artifacts/store-screenshots/raw/03-groceries'

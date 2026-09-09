@@ -8,6 +8,20 @@
       "when": 1785227530893,
       "tag": "0000_nifty_namorita",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1787414400000,
+      "tag": "0001_add_waitlist_entries",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1788950400000,
+      "tag": "0002_durable_flow_state_order_tracking",
+      "breakpoints": true
     }
   ]
 }

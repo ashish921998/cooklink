@@ -1,0 +1,25 @@
+{
+  "cli": {
+    "version": ">= 20.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "preview": {
+      "distribution": "internal",
+      "environment": "preview",
+      "env": {
+        "EXPO_PUBLIC_COOKLINK_PRODUCTION_BUILD": "false"
+      }
+    },
+    "production": {
+      "autoIncrement": true,
+      "environment": "production",
+      "env": {
+        "EXPO_PUBLIC_COOKLINK_PRODUCTION_BUILD": "true"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}

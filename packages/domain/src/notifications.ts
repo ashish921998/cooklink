@@ -1,5 +1,5 @@
 import type { HouseholdRole } from './roles.js';
-import type { NotificationLevel, SystemEventType } from './types.js';
+import type { NotificationLevel, SystemEventType } from './domain-types.js';
 
 /**
  * Notification contract (issue 06).

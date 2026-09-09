@@ -62,8 +62,8 @@ function contrastRatio(fg: string, bg: string): number {
   return (lighter + 0.05) / (darker + 0.05);
 }
 
-// Extract the colours object from ui.tsx source
-const uiSource = readSrc('components/ui.tsx');
+// Extract the colours object from the design system source
+const uiSource = readSrc('components/design-system.tsx');
 
 const COLORS: Record<string, string> = {};
 const colorLines = uiSource.match(/(\w+):\s*'(#[0-9a-fA-F]{6})'/g);
@@ -77,7 +77,10 @@ if (colorLines) {
 // ---- Tests ----
 
 test('AC#2: colour palette is extracted and non-empty', () => {
-  assert.ok(Object.keys(COLORS).length >= 5, 'should extract at least 5 colours from ui.tsx');
+  assert.ok(
+    Object.keys(COLORS).length >= 5,
+    'should extract at least 5 colours from design-system.tsx',
+  );
   assert.ok(COLORS.ink, 'ink colour must exist');
   assert.ok(COLORS.surface, 'surface colour must exist');
   assert.ok(COLORS.accent, 'accent colour must exist');
@@ -165,7 +168,7 @@ test('AC#2: primary button padding meets 44pt touch-target floor', () => {
 });
 
 test('AC#2: BottomTabs Pressables have accessibilityRole, accessibilityState, and accessibilityLabel', () => {
-  const source = readSrc('components/ui.tsx');
+  const source = readSrc('components/design-system.tsx');
   // Find the BottomTabs function body
   const fnStart = source.indexOf('export function BottomTabs');
   assert.ok(fnStart >= 0, 'BottomTabs component must exist');
@@ -179,7 +182,7 @@ test('AC#2: BottomTabs Pressables have accessibilityRole, accessibilityState, an
 });
 
 test('AC#2: ChatHeaderAction has accessibilityRole and accessibilityLabel', () => {
-  const source = readSrc('components/ui.tsx');
+  const source = readSrc('components/design-system.tsx');
   const fnStart = source.indexOf('export function ChatHeaderAction');
   assert.ok(fnStart >= 0, 'ChatHeaderAction component must exist');
   const fnBody = source.slice(fnStart);
@@ -214,6 +217,21 @@ test('AC#2: segment controls in MemberShell use accessibilityRole (non-colour st
   );
 });
 
+test('Week Switcher exposes each day as a labelled selected-state control', () => {
+  const source = readSrc('screens/MemberShell.tsx');
+  const weekSwitcher = source.slice(source.indexOf('function WeekDayButton'));
+  assert.ok(weekSwitcher.includes('accessibilityRole="button"'));
+  assert.ok(weekSwitcher.includes('accessibilityLabel={`${day.relativeLabel}, ${day.fullLabel}`}'));
+  assert.ok(weekSwitcher.includes('accessibilityState={selected'));
+});
+
+test('Week Switcher filters the Today feed and updates its meal heading', () => {
+  const source = readSrc('screens/MemberShell.tsx');
+  assert.ok(source.includes('meal.date === selectedDate'));
+  assert.ok(source.includes('{mealsTitle(selectedDay)}'));
+  assert.ok(source.includes('setSelectedDate'));
+});
+
 test('AC#2: Chat back button meets 44pt touch-target floor', () => {
   const source = readSrc('screens/Chat.tsx');
   const m = source.match(/back:\s*\{[^}]*minHeight:\s*(\d+)/);
@@ -229,7 +247,7 @@ test('AC#2: Chat send/record buttons have accessibilityLabel', () => {
     'Chat must label the send button',
   );
   assert.ok(
-    source.includes('accessibilityLabel={recording'),
+    source.includes("voice.phase === 'recording' ? 'Stop recording' : 'Record voice note'"),
     'Chat must label the record button with recording state',
   );
 });

@@ -14,8 +14,8 @@ import {
   similarityChoiceLabels,
 } from '../grocery-request.js';
 import { detectIntent } from '../intent.js';
-import { Authorization, InMemoryRepository, id } from '../index.js';
-import type { ActionSuggestion, GroceryRequest } from '../types.js';
+import { Authorization, InMemoryRepository, brandId } from '../index.js';
+import type { ActionSuggestion, GroceryRequest } from '../domain-types.js';
 
 const now = new Date('2026-07-27T10:00:00Z');
 const future = new Date('2026-07-27T11:00:00Z').toISOString();
@@ -343,13 +343,13 @@ async function setupHousehold() {
   const repo = new InMemoryRepository();
   const auth = new Authorization(repo);
   const owner = await repo.createUser({
-    id: id<'UserId'>('u-owner'),
+    id: brandId<'UserId'>('u-owner'),
     clerkUserId: 'co',
     phone: '+919700000001',
     displayName: 'Owner',
   });
   const cook = await repo.createUser({
-    id: id<'UserId'>('u-cook'),
+    id: brandId<'UserId'>('u-cook'),
     clerkUserId: 'cc',
     phone: '+919700000002',
     displayName: 'Cook',

@@ -22,9 +22,16 @@ export function createDatabase(url: string | undefined): Database {
   }
   const pool = new pg.Pool({
     connectionString,
-    max: 10,
+    max: positiveInteger(process.env.DB_POOL_MAX, 10),
+    connectionTimeoutMillis: positiveInteger(process.env.DB_CONNECT_TIMEOUT_MS, 5_000),
+    idleTimeoutMillis: positiveInteger(process.env.DB_IDLE_TIMEOUT_MS, 30_000),
     allowExitOnIdle: true,
     ...(process.env.PGBOUNCER === 'true' ? { prepare: false } : {}),
   });
   return drizzle(pool, { schema });
+}
+
+function positiveInteger(raw: string | undefined, fallback: number): number {
+  const value = Number(raw);
+  return Number.isInteger(value) && value > 0 ? value : fallback;
 }

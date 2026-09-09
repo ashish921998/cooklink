@@ -30,6 +30,36 @@ const ASSIGNMENT =
   /\b(secret|password|api[_-]?key|access[_-]?token|refresh[_-]?token|private[_-]?key|db[_-]?password)\s*[:=]\s*["'][A-Za-z0-9_+/=-]{8,}["']/i;
 
 /**
+ * Exact literal values that have been reviewed and confirmed NOT to be real
+ * credentials. Each entry weakens the history scan, so this set must stay
+ * narrow and every entry must be justified here in full.
+ *
+ * IMPORTANT: never allowlist a bare key prefix such as `sk_test_`. That would
+ * silently disable detection of every Clerk / Stripe test key. Only the
+ * complete, specific placeholder string is allowlisted, so any real-shaped
+ * credential (which is never byte-for-byte equal to a dictionary placeholder)
+ * is still flagged.
+ */
+const KNOWN_PLACEHOLDERS: ReadonlySet<string> = new Set([
+  /**
+   * `apps/server/src/tests/auth.test.ts` (commit 6133fa8) sets
+   * `process.env.CLERK_SECRET_KEY = 'sk_test_placeholder'` to exercise the
+   * "CLERK_PUBLISHABLE_KEY missing" branch of `resolveClerkIdentity`. It is
+   * an all-lowercase dictionary word with no digits — not a real Clerk key —
+   * but it matches the HIGH_ENTROPY `sk_test_[A-Za-z0-9]{10,}` shape, so the
+   * exact value is allowlisted here rather than weakening the pattern.
+   */
+  'sk_test_placeholder',
+  /**
+   * `provider-swiggy.test.ts` uses this literal as a deterministic OAuth
+   * fixture. The `test-` prefix and dictionary words cannot be a production
+   * bearer token; allowlisting only the complete value keeps the assignment
+   * detector strict for every other token.
+   */
+  'test-access-token',
+]);
+
+/**
  * Scan the full git history of `repoRoot` (defaults to the monorepo root) and
  * return every violation found. An empty return means no provider secret,
  * service credential, database key, or plaintext token literal is present in
@@ -71,24 +101,35 @@ export function grepGitHistory(repoRoot?: string): HistoryViolation[] {
     if (isNameOnlyReference(text)) continue;
 
     for (const pattern of [HIGH_ENTROPY, ASSIGNMENT]) {
-      if (pattern.test(text)) {
-        // Deduplicate by (path, pattern, text) so the same blob committed
-        // across multiple commits is only reported once.
-        const dedupeKey = `${path}:${pattern.source}:${text.trim().slice(0, 120)}`;
-        if (seenBlobs.has(dedupeKey)) break;
-        seenBlobs.add(dedupeKey);
-        violations.push({
-          commit,
-          path,
-          line: 0, // diff line number within the file is not meaningful here
-          pattern: pattern.source,
-          text: text.trim().slice(0, 120),
-        });
-        break;
-      }
+      const match = pattern.exec(text);
+      if (!match) continue;
+      // A narrow, reviewed placeholder is not a leak (see KNOWN_PLACEHOLDERS).
+      // This excludes only the exact placeholder string — never a whole key
+      // prefix — so real Clerk/Stripe keys are still caught.
+      if (KNOWN_PLACEHOLDERS.has(match[0]) || containsKnownPlaceholder(text)) continue;
+      // Deduplicate by (path, pattern, text) so the same blob committed
+      // across multiple commits is only reported once.
+      const dedupeKey = `${path}:${pattern.source}:${text.trim().slice(0, 120)}`;
+      if (seenBlobs.has(dedupeKey)) break;
+      seenBlobs.add(dedupeKey);
+      violations.push({
+        commit,
+        path,
+        line: 0, // diff line number within the file is not meaningful here
+        pattern: pattern.source,
+        text: text.trim().slice(0, 120),
+      });
+      break;
     }
   }
   return violations;
+}
+
+function containsKnownPlaceholder(text: string): boolean {
+  for (const placeholder of KNOWN_PLACEHOLDERS) {
+    if (text.includes(`'${placeholder}'`) || text.includes(`"${placeholder}"`)) return true;
+  }
+  return false;
 }
 
 function resolveRepoRoot(): string {

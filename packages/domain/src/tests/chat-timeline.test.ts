@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { InMemoryRepository, id } from '../index.js';
-import type { TimelineItem } from '../types.js';
+import { InMemoryRepository, brandId } from '../index.js';
+import type { TimelineItem } from '../domain-types.js';
 
 /**
  * Timeline + per-person read state behaviour for Household Chat (issue 04 / 06).
@@ -13,7 +13,7 @@ import type { TimelineItem } from '../types.js';
 async function setup() {
   const repo = new InMemoryRepository();
   const user = await repo.createUser({
-    id: id<'UserId'>('u-1'),
+    id: brandId<'UserId'>('u-1'),
     clerkUserId: 'c1',
     phone: '+919200000001',
     displayName: 'Meera',

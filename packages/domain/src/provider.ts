@@ -1,5 +1,5 @@
 import type { HouseholdId, MembershipId, UserId } from './ids.js';
-import type { SuggestedCartItem, ISODateTime } from './types.js';
+import type { SuggestedCartItem, ISODateTime } from './domain-types.js';
 
 /**
  * The Instamart (Swiggy MCP) provider port for issue 10.
@@ -24,8 +24,9 @@ export interface ProviderAddress {
   line2: string | null;
   city: string;
   pincode: string;
-  lat: number;
-  lng: number;
+  /** Saved-address responses intentionally omit coordinates for privacy. */
+  lat: number | null;
+  lng: number | null;
 }
 
 /**
@@ -36,6 +37,8 @@ export interface ProviderAddress {
 export interface ProviderProduct {
   /** Swiggy product id (spinId in the MCP contract). */
   id: string;
+  /** SKU id paired with spinId when `update_cart` requires both identifiers. */
+  skuId?: string | null;
   name: string;
   brand: string;
   variant: string | null; // "500 g", "Organic", ...
@@ -49,11 +52,14 @@ export interface ProviderProduct {
   storeId: string;
   storeName: string;
   imageUrl: string | null;
+  /** True when Swiggy returned this below the direct matches as a similar item. */
+  similar?: boolean;
 }
 
 /** A line item in the provider cart (after `update_cart` / `get_cart`). */
 export interface ProviderCartItem {
   productId: string;
+  skuId?: string | null;
   name: string;
   brand: string;
   variant: string | null;
@@ -158,6 +164,7 @@ export type ProviderErrorCode =
   | 'product_not_found'
   | 'product_unavailable'
   | 'cart_empty'
+  | 'payment_method_unavailable'
   | 'rate_limited'
   | 'upstream_error'
   | 'expired_session';
@@ -236,8 +243,11 @@ export interface GroceryProvider {
   updateCart(args: {
     memberUserId: UserId;
     addressId: string;
-    items: { productId: string; quantity: number }[];
+    items: { productId: string; skuId?: string | null; quantity: number }[];
   }): Promise<ProviderCartReview>;
+
+  /** `clear_cart` — remove every item from the member's Instamart cart. */
+  clearCart(memberUserId: UserId, addressId: string): Promise<void>;
 
   /**
    * Offer up to three exact available alternatives for a product that became
@@ -352,6 +362,11 @@ export function resolveMatchPlan(input: {
   });
 }
 
+/** Only explicitly approved grocery lines may reach provider matching/cart APIs. */
+export function orderableCartItems(cartItems: SuggestedCartItem[]): SuggestedCartItem[] {
+  return cartItems.filter((cartItem) => cartItem.memberState === 'kept');
+}
+
 /**
  * The Member's explicit choice when updating the Instamart cart (AC#4).
  * `update_cart` replaces the ENTIRE cart, so Cooklink must deliberately
@@ -373,10 +388,10 @@ export type CartUpdateMode = 'preserve' | 'replace';
  */
 export function buildCartUpdatePlan(input: {
   currentItems: ProviderCartItem[];
-  intendedItems: { productId: string; quantity: number }[];
+  intendedItems: { productId: string; skuId?: string | null; quantity: number }[];
   mode: CartUpdateMode;
 }): {
-  items: { productId: string; quantity: number }[];
+  items: { productId: string; skuId?: string | null; quantity: number }[];
   preservedCount: number;
   replacedCount: number;
 } {
@@ -393,7 +408,11 @@ export function buildCartUpdatePlan(input: {
   const preserved = input.currentItems.filter((item) => !intendedIds.has(item.productId));
   return {
     items: [
-      ...preserved.map((item) => ({ productId: item.productId, quantity: item.quantity })),
+      ...preserved.map((item) => ({
+        productId: item.productId,
+        skuId: item.skuId,
+        quantity: item.quantity,
+      })),
       ...input.intendedItems,
     ],
     preservedCount: preserved.length,

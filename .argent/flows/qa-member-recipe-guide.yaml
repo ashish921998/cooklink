@@ -1,0 +1,18 @@
+steps:
+  - echo: Restart Cooklink in design preview; expect the member Today screen.
+  - launch: com.cooklink.app
+  - await: { visible: { text: "Today's meals" }, timeout: 30000 }
+  - await: { idle: true, timeout: 9000 }
+  - echo: On Today; open Meal Plan and expect the weekly plan.
+  - tap: { text: Meal Plan }
+  - await: { visible: { text: 'Seven days, one clear plan.' }, timeout: 10000 }
+  - await: { idle: true, stableFor: 3000, timeout: 9000 }
+  - echo: On Meal Plan; open the Dal Tadka meal and expect its Recipe Guide.
+  - tap: { text: lunch Dal Tadka }
+  - await: { visible: { text: Ingredients }, timeout: 10000 }
+  - await: { idle: true, timeout: 9000 }
+  - await: { visible: { text: Verified Cooklink recipe }, timeout: 10000 }
+  - echo: On the Recipe Guide; return to Meal Plan.
+  - tap: { text: Back to meal plan }
+  - await: { visible: { text: 'Seven days, one clear plan.' }, timeout: 10000 }
+  - await: { idle: true, stableFor: 3000, timeout: 9000 }

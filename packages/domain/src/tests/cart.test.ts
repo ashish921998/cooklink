@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildSuggestedCart, needDayFor } from '../cart.js';
-import type { PlannedMeal, Recipe, PantryLedgerEntry, GroceryRequest } from '../types.js';
+import type { PlannedMeal, Recipe, PantryLedgerEntry, GroceryRequest } from '../domain-types.js';
 
 const TODAY = '2026-01-10';
 const recipe: Recipe = {

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { id } from '@cooklink/domain';
+import { brandId } from '@cooklink/domain';
 import { createStubProvider } from '../provider-stub.js';
 
 /**
@@ -11,7 +11,7 @@ import { createStubProvider } from '../provider-stub.js';
  * alternatives for unavailable products (AC#5).
  */
 
-const USER = id<'UserId'>('u-stub-1');
+const USER = brandId<'UserId'>('u-stub-1');
 
 async function connect(provider: ReturnType<typeof createStubProvider>) {
   const start = await provider.startOAuth({
@@ -100,6 +100,18 @@ test('stub provider: empty cart returns null review', async () => {
   await connect(provider);
   const review = await provider.getCart(USER, 'addr-home');
   assert.equal(review, null);
+});
+
+test('stub provider: clearCart removes every item', async () => {
+  const provider = createStubProvider();
+  await connect(provider);
+  await provider.updateCart({
+    memberUserId: USER,
+    addressId: 'addr-home',
+    items: [{ productId: 'prod-tomato-500', quantity: 1 }],
+  });
+  await provider.clearCart(USER, 'addr-home');
+  assert.equal(await provider.getCart(USER, 'addr-home'), null);
 });
 
 test('stub provider: updateCart builds a review with bill and payment methods', async () => {

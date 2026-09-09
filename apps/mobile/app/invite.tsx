@@ -1,7 +1,9 @@
-import { useRouter, useLocalSearchParams } from 'expo-router';
-import { useUser } from '@clerk/clerk-expo';
+import { Redirect, useRouter, useLocalSearchParams } from 'expo-router';
+import { useUser } from '@clerk/expo';
+import { useCallback } from 'react';
 import { AcceptInvite } from '../src/screens/AcceptInvite';
-import { Loading } from '../src/components/ui';
+import { devAuthEnabled } from '../src/lib/api';
+import { Loading } from '../src/components/design-system';
 
 /**
  * The deep-link entry for invite acceptance (issue 03). A WhatsApp message
@@ -21,26 +23,37 @@ import { Loading } from '../src/components/ui';
 export default function InviteRoute() {
   const { isLoaded, isSignedIn } = useUser();
   const router = useRouter();
-  const params = useLocalSearchParams<{ token?: string | string[] }>();
+  const params = useLocalSearchParams<{
+    token?: string | string[];
+    expected_role?: string | string[];
+  }>();
+  const returnHome = useCallback(() => router.replace('/'), [router]);
 
-  if (!isLoaded) return <Loading />;
+  if (!devAuthEnabled && !isLoaded) return <Loading />;
 
   const raw = params.token;
   const prefillToken = Array.isArray(raw) ? (raw[0] ?? '') : (raw ?? '');
+  const rawExpectedRole = params.expected_role;
+  const expectedRoleValue = Array.isArray(rawExpectedRole) ? rawExpectedRole[0] : rawExpectedRole;
+  const expectedRole =
+    expectedRoleValue === 'member' || expectedRoleValue === 'cook' ? expectedRoleValue : undefined;
 
-  if (!isSignedIn) {
-    const target = prefillToken
-      ? `/?pending_invite_token=${encodeURIComponent(prefillToken)}`
-      : '/';
-    router.replace(target);
-    return <Loading />;
+  // Redirect declaratively: navigating from the render body re-enters the
+  // navigator on every render, which trips React's update-depth limit.
+  if (!devAuthEnabled && !isSignedIn) {
+    return (
+      <Redirect
+        href={prefillToken ? `/?pending_invite_token=${encodeURIComponent(prefillToken)}` : '/'}
+      />
+    );
   }
 
   return (
     <AcceptInvite
       prefillToken={prefillToken}
-      onAccepted={() => router.replace('/')}
-      onCancel={() => router.replace('/')}
+      expectedRole={expectedRole}
+      onAccepted={returnHome}
+      onCancel={returnHome}
     />
   );
 }

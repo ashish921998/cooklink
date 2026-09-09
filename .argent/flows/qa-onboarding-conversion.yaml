@@ -1,0 +1,57 @@
+steps:
+  - echo: Restart Cooklink in onboarding preview; expect the role-first screen.
+  - launch: com.cooklink.app
+  - await: { visible: { id: role-first-screen }, timeout: 30000 }
+  - await: { idle: true, timeout: 9000 }
+  - assert: { visible: { id: choose-owner-role } }
+  - assert: { visible: { id: choose-member-role } }
+  - assert: { visible: { id: choose-cook-role } }
+  - echo: On role choice; select Household member and expect member-specific invite guidance.
+  - tap: { id: choose-member-role }
+  - await: { visible: { id: invite-member-screen }, timeout: 15000 }
+  - await: { idle: true, timeout: 9000 }
+  - assert: { visible: { text: Join your household } }
+  - assert: { visible: { text: Member permissions } }
+  - echo: On member invite guidance; cancel and expect the role-first screen again.
+  - tap: { text: Cancel }
+  - await: { visible: { id: role-first-screen }, timeout: 15000 }
+  - await: { idle: true, timeout: 9000 }
+  - echo: On role choice; select Hired cook and expect cook-specific invite guidance.
+  - tap: { id: choose-cook-role }
+  - await: { visible: { id: invite-cook-screen }, timeout: 15000 }
+  - await: { idle: true, timeout: 9000 }
+  - assert: { visible: { text: Join a work household } }
+  - assert: { visible: { text: Cook permissions } }
+  - echo: On cook invite guidance; cancel and expect the role-first screen again.
+  - tap: { text: Cancel }
+  - await: { visible: { id: role-first-screen }, timeout: 15000 }
+  - await: { idle: true, timeout: 9000 }
+  - echo: On role choice; select Household owner and expect the plan-first setup screen.
+  - tap: { id: choose-owner-role }
+  - await: { visible: { id: owner-onboarding-screen }, timeout: 15000 }
+  - await: { idle: true, timeout: 9000 }
+  - assert: { visible: { text: 'Your first week, ready in about 15 seconds' } }
+  - assert: { visible: { text: Household name (required) } }
+  - assert: { visible: { text: Starter choices } }
+  - assert: { visible: { text: 4 diners · North Indian · Vegetarian } }
+  - assert: { visible: { id: toggle-onboarding-personalization } }
+  - assert: { visible: { id: create-first-plan-button } }
+  - assert: { visible: { text: Usually ready in about 15 seconds. } }
+  - echo: On owner setup; expand optional personalization and expect all three preference groups.
+  - tap: { id: toggle-onboarding-personalization }
+  - await: { visible: { text: Usual number of diners }, timeout: 10000 }
+  - assert: { visible: { text: Meal style } }
+  - scroll-to: { target: { text: Food preference }, direction: down }
+  - await: { visible: { text: Food preference }, timeout: 10000 }
+  - echo: Optional personalization is visible; collapse it and expect the starter choices to remain while fields disappear.
+  - scroll-to: { target: { id: toggle-onboarding-personalization }, direction: up }
+  - assert: { visible: { id: toggle-onboarding-personalization } }
+  - tap: { id: toggle-onboarding-personalization }
+  - await: { hidden: { text: Usual number of diners }, timeout: 10000 }
+  - assert: { visible: { text: 4 diners · North Indian · Vegetarian } }
+  - echo: Owner defaults are ready; create the seven-day plan and expect 21 active meals.
+  - tap: { id: create-first-plan-button }
+  - await: { visible: { id: onboarding-complete-screen }, timeout: 15000 }
+  - await: { idle: true, timeout: 9000 }
+  - assert: { visible: { text: Your first week is ready } }
+  - assert: { visible: { text: 21 meals are active } }

@@ -1,0 +1,48 @@
+steps:
+  - echo: Restart Cooklink in design preview; expect the member Today screen.
+  - launch: com.cooklink.app
+  - await: { visible: { text: "Today's meals" }, timeout: 30000 }
+  - await: { idle: true, timeout: 9000 }
+  - echo: On Today; open Groceries and expect the grocery review surface.
+  - tap: { text: Groceries }
+  - await: { visible: { text: Review first. Order second. }, timeout: 10000 }
+  - await: { idle: true, timeout: 9000 }
+  - echo: On Groceries; move to the connected Instamart product matcher.
+  - scroll-to: { target: { text: 'Choose Fresh Farms Tomatoes, 500 g' }, direction: down }
+  - await: { visible: { text: 'Choose Fresh Farms Tomatoes, 500 g' }, timeout: 10000 }
+  - echo: Choose the first exact Tomato pack and expect that grocery need to resolve.
+  - tap: { text: 'Choose Fresh Farms Tomatoes, 500 g' }
+  - await: { hidden: { text: 'Choose Fresh Farms Tomatoes, 500 g' }, timeout: 10000 }
+  - await: { visible: { text: 'Fresh Farms · 500 g · Qty 1' }, timeout: 10000 }
+  - scroll-to: { target: { text: 'Choose Tata Sampann Toor Dal, 500 g' }, direction: down }
+  - await: { visible: { text: 'Choose Tata Sampann Toor Dal, 500 g' }, timeout: 10000 }
+  - echo: Choose the exact Toor Dal pack and expect that grocery need to resolve.
+  - tap: { text: 'Choose Tata Sampann Toor Dal, 500 g' }
+  - await: { hidden: { text: 'Choose Tata Sampann Toor Dal, 500 g' }, timeout: 10000 }
+  - await: { visible: { text: 'Tata Sampann · 500 g · Qty 1' }, timeout: 10000 }
+  - await: { visible: { text: 'Choose Milky Mist Fresh Paneer, 200 g' }, timeout: 10000 }
+  - echo: Choose the exact Paneer pack and expect all grocery needs to resolve.
+  - tap: { text: 'Choose Milky Mist Fresh Paneer, 200 g' }
+  - await: { hidden: { text: 'Choose Milky Mist Fresh Paneer, 200 g' }, timeout: 10000 }
+  - await: { visible: { text: 'Milky Mist · 200 g · Qty 1' }, timeout: 10000 }
+  - scroll-to: { target: { text: Keep existing }, direction: down }
+  - await: { visible: { text: Keep existing }, timeout: 10000 }
+  - echo: All products are resolved; keep existing Instamart items, then review the provider cart.
+  - tap: { text: Keep existing }
+  - tap: { id: review-instamart-cart-button }
+  - scroll-to: { target: { text: Your Instamart cart }, direction: down }
+  - await: { visible: { text: Your Instamart cart }, timeout: 10000 }
+  - await: { idle: true, timeout: 9000 }
+  - scroll-to: { target: { id: prepare-instamart-checkout-button }, direction: down }
+  - await: { visible: { id: prepare-instamart-checkout-button }, timeout: 10000 }
+  - echo: The exact cart and COD payment are ready; continue to a fresh final confirmation.
+  - tap: { id: prepare-instamart-checkout-button }
+  - scroll-to: { target: { id: place-instamart-order-button }, direction: down }
+  - await: { visible: { text: Final confirmation }, timeout: 10000 }
+  - await: { idle: true, timeout: 9000 }
+  - await: { visible: { id: place-instamart-order-button }, timeout: 10000 }
+  - echo: The fresh confirmation is visible; place the preview Instamart order and expect success.
+  - tap: { id: place-instamart-order-button }
+  - await: { visible: { text: Delivery status }, timeout: 10000 }
+  - await: { idle: true, timeout: 9000 }
+  - await: { visible: { text: Track in Swiggy }, timeout: 10000 }

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { id } from '../ids.js';
+import { brandId } from '../ids.js';
 import {
   MAX_CAPTION_LENGTH,
   MAX_VOICE_DURATION_MS,
@@ -12,7 +12,7 @@ import {
   isMediaAccessible,
   validateMessageShape,
 } from '../chat-media.js';
-import type { ChatMessage, VoiceTranscript } from '../types.js';
+import type { ChatMessage, VoiceTranscript } from '../domain-types.js';
 
 const BASE = '2026-07-01T10:00:00.000Z';
 
@@ -155,7 +155,7 @@ test('the author may correct a voice transcript within the 15-minute window', ()
   const now = new Date(BASE);
   now.setSeconds(now.getSeconds() + 60);
   const decision = canCorrectTranscript({
-    actorId: id<'MembershipId'>('me'),
+    actorId: brandId<'MembershipId'>('me'),
     message: voiceMessage(),
     correctedText: 'नारियल 2 चाहिए',
     now,
@@ -165,7 +165,7 @@ test('the author may correct a voice transcript within the 15-minute window', ()
 
 test('a non-voice message cannot have its transcript corrected', () => {
   const decision = canCorrectTranscript({
-    actorId: id<'MembershipId'>('me'),
+    actorId: brandId<'MembershipId'>('me'),
     message: textMessage(),
     correctedText: 'x',
     now: new Date(BASE),
@@ -176,7 +176,7 @@ test('a non-voice message cannot have its transcript corrected', () => {
 
 test('only the author may correct the transcript', () => {
   const decision = canCorrectTranscript({
-    actorId: id<'MembershipId'>('someone-else'),
+    actorId: brandId<'MembershipId'>('someone-else'),
     message: voiceMessage(),
     correctedText: 'x',
     now: new Date(BASE),
@@ -187,7 +187,7 @@ test('only the author may correct the transcript', () => {
 
 test('an empty correction is rejected', () => {
   const decision = canCorrectTranscript({
-    actorId: id<'MembershipId'>('me'),
+    actorId: brandId<'MembershipId'>('me'),
     message: voiceMessage(),
     correctedText: '   ',
     now: new Date(BASE),
@@ -200,7 +200,7 @@ test('transcript correction is rejected after the edit window', () => {
   const later = new Date(BASE);
   later.setMinutes(later.getMinutes() + 16);
   const decision = canCorrectTranscript({
-    actorId: id<'MembershipId'>('me'),
+    actorId: brandId<'MembershipId'>('me'),
     message: voiceMessage(),
     correctedText: 'x',
     now: later,
@@ -211,7 +211,7 @@ test('transcript correction is rejected after the edit window', () => {
 
 test('a deleted voice message cannot have its transcript corrected', () => {
   const decision = canCorrectTranscript({
-    actorId: id<'MembershipId'>('me'),
+    actorId: brandId<'MembershipId'>('me'),
     message: voiceMessage({ deletedAt: '2026-07-01T10:01:00.000Z' }),
     correctedText: 'x',
     now: new Date(BASE),

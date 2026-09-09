@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { id } from '../ids.js';
+import { brandId } from '../ids.js';
 import {
   Authorization,
   AuthorizationDeniedError,
@@ -35,7 +35,7 @@ import {
 function makeCartItem(overrides: Partial<SuggestedCartItem> = {}): SuggestedCartItem {
   return {
     id: 'cart-1',
-    householdId: id<'HouseholdId'>('h-1'),
+    householdId: brandId<'HouseholdId'>('h-1'),
     ingredientKey: 'tomato',
     groceryRequestId: null,
     freeTextItem: null,
@@ -122,8 +122,8 @@ test('AC#6: partial success is classified and the user is told which stores fail
 
 test('AC#6: an expired checkout confirmation denies checkout (stale snapshot)', () => {
   const now = new Date('2026-07-27T10:00:00.000Z');
-  const household = id<'HouseholdId'>('h-recovery');
-  const member = id<'MembershipId'>('m-recovery');
+  const household = brandId<'HouseholdId'>('h-recovery');
+  const member = brandId<'MembershipId'>('m-recovery');
   const review = {
     addressId: 'addr-home',
     items: [
@@ -230,13 +230,13 @@ test('AC#6: an unavailable product offers alternatives and requires deliberate r
     matches: [
       {
         id: 'match-1',
-        householdId: id<'HouseholdId'>('h-1'),
+        householdId: brandId<'HouseholdId'>('h-1'),
         cartItemId: cartItem.id,
         productId: 'prod-tomato-500',
         addressId: 'addr-home',
         quantity: 2,
         product: selectedProduct,
-        selectedById: id<'MembershipId'>('m-1'),
+        selectedById: brandId<'MembershipId'>('m-1'),
         selectedAt: new Date().toISOString(),
       },
     ],
@@ -265,13 +265,13 @@ test('AC#6: a resolved product that is still available stays resolved', () => {
     matches: [
       {
         id: 'match-1',
-        householdId: id<'HouseholdId'>('h-1'),
+        householdId: brandId<'HouseholdId'>('h-1'),
         cartItemId: cartItem.id,
         productId: 'prod-tomato-500',
         addressId: 'addr-home',
         quantity: 2,
         product,
-        selectedById: id<'MembershipId'>('m-1'),
+        selectedById: brandId<'MembershipId'>('m-1'),
         selectedAt: new Date().toISOString(),
       },
     ],
@@ -304,7 +304,7 @@ test('AC#6: a removed membership is denied authorization immediately', async () 
   const auth = new Authorization(repo);
 
   const owner = await repo.createUser({
-    id: id<'UserId'>('u-recovery-owner'),
+    id: brandId<'UserId'>('u-recovery-owner'),
     clerkUserId: 'owner-recovery',
     phone: '+919000000010',
     displayName: 'Owner',
@@ -324,7 +324,7 @@ test('AC#6: a removed membership is denied authorization immediately', async () 
   );
 
   const cook = await repo.createUser({
-    id: id<'UserId'>('u-recovery-cook'),
+    id: brandId<'UserId'>('u-recovery-cook'),
     clerkUserId: 'cook-recovery',
     phone: '+919000000011',
     displayName: 'Cook',
@@ -347,7 +347,7 @@ test('AC#6: a closed household denies all members', async () => {
   const auth = new Authorization(repo);
 
   const owner = await repo.createUser({
-    id: id<'UserId'>('u-close-owner'),
+    id: brandId<'UserId'>('u-close-owner'),
     clerkUserId: 'close-owner',
     phone: '+919000000020',
     displayName: 'Owner',

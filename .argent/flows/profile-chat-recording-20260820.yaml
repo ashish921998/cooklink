@@ -1,0 +1,14 @@
+steps:
+  - echo: Restart Cooklink in design preview; expect the Today screen.
+  - launch: com.cooklink.app
+  - await: { visible: { id: today-screen }, timeout: 30000 }
+  - await: { idle: true, timeout: 9000 }
+  - echo: On Today; open Household Chat and expect the Chat screen.
+  - tap: { text: Household Chat }
+  - await: { visible: { text: Message the household }, timeout: 15000 }
+  - await: { idle: true, timeout: 9000 }
+  - echo: Chat is ready; start recording, wait five seconds, stop, and expect review controls.
+  - tap: { id: record-voice-note-button }
+  - wait: 5000
+  - tap: { id: record-voice-note-button }
+  - await: { visible: { text: Voice note ready }, timeout: 10000 }

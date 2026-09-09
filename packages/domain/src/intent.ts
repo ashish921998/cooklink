@@ -1,4 +1,4 @@
-import type { ChatIntent, MealType } from './types.js';
+import type { ChatIntent, MealType } from './domain-types.js';
 
 /**
  * Chat intent detection contract (issue 06).

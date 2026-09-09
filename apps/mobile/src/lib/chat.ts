@@ -1,8 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useAuth } from '@clerk/clerk-expo';
-import { useApi } from './api';
-
-const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
+import { apiUrl as API_URL, devAuthHeaders, useApi, useTokenResolver } from './api';
 
 /**
  * Household Chat client (issue 04 — text chat; ticket 06 — photo and voice).
@@ -170,7 +167,7 @@ export const EDIT_WINDOW_MS = 15 * 60 * 1000;
  */
 export function useHouseholdChat(householdId: string, ownMembershipId: string | null) {
   const api = useApi();
-  const { getToken } = useAuth();
+  const resolveToken = useTokenResolver();
   const [items, setItems] = useState<TimelineItem[]>([]);
   const [outbox, setOutbox] = useState<OutboxItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -180,8 +177,8 @@ export function useHouseholdChat(householdId: string, ownMembershipId: string | 
   const [pendingSuggestion, setPendingSuggestion] = useState<ActionSuggestionResponse | null>(null);
   const newestIdRef = useRef<string | null>(null);
   // Stable refs for the media upload fetch (which sends raw bytes, not JSON).
-  const useAuthRef = useRef({ getToken });
-  useAuthRef.current = { getToken };
+  const tokenResolverRef = useRef(resolveToken);
+  tokenResolverRef.current = resolveToken;
   const apiUrlRef = useRef(API_URL);
 
   const sortByTime = useCallback((rows: TimelineItem[]): TimelineItem[] => {
@@ -342,14 +339,14 @@ export function useHouseholdChat(householdId: string, ownMembershipId: string | 
       data: ArrayBuffer | Uint8Array,
       contentType: string,
     ): Promise<string> => {
-      const { getToken } = useAuthRef.current;
-      const token = await getToken();
+      const token = await tokenResolverRef.current();
       const res = await fetch(
         `${apiUrlRef.current}/v1/households/${householdId}/chat/media?kind=${kind}`,
         {
           method: 'POST',
           headers: {
             'content-type': contentType,
+            ...devAuthHeaders,
             ...(token ? { authorization: `Bearer ${token}` } : {}),
           },
           body: data as BodyInit,

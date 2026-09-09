@@ -18,11 +18,16 @@
     "db:migrate": "pnpm --filter @cooklink/db migrate",
     "db:seed": "pnpm --filter @cooklink/db seed",
     "secrets:check": "pnpm --filter @cooklink/server secrets:check",
-    "secrets:grep": "pnpm --filter @cooklink/server secrets:grep"
+    "secrets:grep": "pnpm --filter @cooklink/server secrets:grep",
+    "load:smoke": "node scripts/load-smoke.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.14.0",
     "eslint": "^9.14.0",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-native": "^5.0.0",
+    "eslint-plugin-react-perf": "^3.3.3",
     "prettier": "^3.3.3",
     "typescript": "^5.6.3",
     "typescript-eslint": "^8.13.0"

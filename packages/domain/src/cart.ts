@@ -9,7 +9,7 @@ import type {
   PlannedMeal,
   Recipe,
   SuggestedCartItem,
-} from './types.js';
+} from './domain-types.js';
 import type { HouseholdId } from './ids.js';
 import { type NetQuantity, classifyConfidence, emptyNeed, netAvailable } from './pantry.js';
 import { dependableIngredients } from './recipes.js';
@@ -323,11 +323,15 @@ export async function refreshSuggestedCart(
     pantryByIngredient.set(key, await repo.listPantryLedger(householdId, key));
   }
 
-  // 4. Load the previous cart's Member removals so "already_have" reasons
-  //    improve the next estimate (issue 09, AC#7). Ingredients a Member said
-  //    they already have are treated as likely available and do not reappear.
+  // 4. Load the previous cart's Member review state so it survives a rebuild
+  //    (issue 09, AC#6/AC#7). Ingredients a Member said they already have are
+  //    treated as likely available and do not reappear, and lines the Member
+  //    kept stay kept: the cart is rebuilt on every read, so resetting the
+  //    review state here would silently discard the Member's review before it
+  //    can reach product matching or checkout.
   const previousCart = await repo.getSuggestedCart(householdId);
   const memberAlreadyHave = new Set<string>();
+  const keptByNeed = new Map<string, SuggestedCartItem>();
   for (const item of previousCart) {
     if (
       item.memberState === 'removed' &&
@@ -335,6 +339,9 @@ export async function refreshSuggestedCart(
       item.ingredientKey
     ) {
       memberAlreadyHave.add(item.ingredientKey);
+    }
+    if (item.memberState === 'kept') {
+      keptByNeed.set(cartNeedKey(item), item);
     }
   }
 
@@ -349,5 +356,26 @@ export async function refreshSuggestedCart(
     now,
   });
   const items = toCartItems(householdId, drafts);
+  for (const item of items) {
+    if (keptByNeed.has(cartNeedKey(item))) {
+      item.memberState = 'kept';
+      item.removalReason = null;
+    }
+  }
   return repo.replaceSuggestedCart(householdId, items);
+}
+
+/**
+ * Identity of the underlying need behind a cart line (issue 09). A rebuild
+ * re-derives the same need from the plan and approved requests, so the
+ * Member's review state is carried over by need rather than by row id.
+ */
+function cartNeedKey(item: {
+  groceryRequestId: SuggestedCartItem['groceryRequestId'];
+  ingredientKey: SuggestedCartItem['ingredientKey'];
+  freeTextItem: SuggestedCartItem['freeTextItem'];
+}): string {
+  if (item.groceryRequestId) return `request:${item.groceryRequestId}`;
+  if (item.ingredientKey) return `ingredient:${item.ingredientKey}`;
+  return `text:${item.freeTextItem ?? ''}`;
 }

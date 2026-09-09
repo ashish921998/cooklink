@@ -1,5 +1,5 @@
-import type { DietStyle, ISODate, MealStyle, MealType, PlannedMeal } from './types.js';
-import { MEAL_TYPES, mostRestrictive } from './types.js';
+import type { DietStyle, ISODate, MealStyle, MealType, PlannedMeal } from './domain-types.js';
+import { MEAL_TYPES, mostRestrictiveDietStyle } from './domain-types.js';
 import { addDays } from './cart.js';
 
 /**
@@ -74,18 +74,26 @@ export interface PlannedMealDraft {
  * restrictive active diet style and avoids repeating a named meal within three
  * days (issue 04, candidate rules). One Special Meal if enabled.
  */
-export function generateStarterPlan(today: ISODate, seed: PlanSeed): PlannedMealDraft[] {
+export function generateStarterPlan(
+  today: ISODate,
+  seed: PlanSeed,
+  previousMeals: Pick<PlannedMeal, 'date' | 'mealType' | 'name'>[] = [],
+): PlannedMealDraft[] {
   const out: PlannedMealDraft[] = [];
   const pool = SEED[seed.mealStyle][seed.dietStyle];
   const used: string[] = [];
   const specialDay = seed.specialMealEnabled ? 5 : -1; // ~once per week
   for (let d = 0; d < 7; d++) {
     for (const mealType of MEAL_TYPES) {
-      const candidates = pool[mealType];
+      const previousName = previousMeals.find(
+        (meal) => meal.date === addDays(today, d) && meal.mealType === mealType,
+      )?.name;
+      const alternatives = pool[mealType].filter((name) => name !== previousName);
+      const candidates = alternatives.length ? alternatives : pool[mealType];
       const isSpecial = d === specialDay && mealType === 'dinner';
       let name = pickAvoidingRepeat(candidates, used, 3);
       if (isSpecial) {
-        const specials = SPECIALS[seed.mealStyle];
+        const specials = SPECIALS[seed.mealStyle].filter((name) => name !== previousName);
         name = pickAvoidingRepeat(specials, used, 99) ?? name;
       }
       used.push(name);
@@ -160,6 +168,6 @@ export function regenerateKeepsEdited(
 
 /** Apply most-restrictive diet guardrail to a candidate pool (issue 04, AC#2). */
 export function restrictPool(pool: string[], styles: DietStyle[]): string[] {
-  void mostRestrictive(styles); // guardrail marker; real filtering happens by recipe dietStyle
+  void mostRestrictiveDietStyle(styles); // guardrail marker; real filtering happens by recipe dietStyle
   return pool;
 }

@@ -1,7 +1,7 @@
 import { and, eq, isNull } from 'drizzle-orm';
 import type { Database } from '@cooklink/db';
 import { households, memberships } from '@cooklink/db';
-import { id, type AuthorizationLookup, type MembershipSnapshot } from '@cooklink/domain';
+import { brandId, type AuthorizationLookup, type MembershipSnapshot } from '@cooklink/domain';
 import type { HouseholdId, UserId } from '@cooklink/domain';
 
 export class DrizzleAuthorizationLookup implements AuthorizationLookup {
@@ -29,15 +29,15 @@ export class DrizzleAuthorizationLookup implements AuthorizationLookup {
     return {
       membership: {
         ...row.membership,
-        id: id<'MembershipId'>(row.membership.id),
-        userId: id<'UserId'>(row.membership.userId),
-        householdId: id<'HouseholdId'>(row.membership.householdId),
+        id: brandId<'MembershipId'>(row.membership.id),
+        userId: brandId<'UserId'>(row.membership.userId),
+        householdId: brandId<'HouseholdId'>(row.membership.householdId),
         joinedAt: row.membership.joinedAt.toISOString(),
         removedAt: row.membership.removedAt?.toISOString() ?? null,
       },
       household: {
         ...row.household,
-        id: id<'HouseholdId'>(row.household.id),
+        id: brandId<'HouseholdId'>(row.household.id),
         healthEmphasis: row.household.healthEmphasis,
         createdAt: row.household.createdAt.toISOString(),
         closedAt: row.household.closedAt?.toISOString() ?? null,

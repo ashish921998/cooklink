@@ -1,7 +1,7 @@
 import { canEditOrDeleteMessage } from './chat-lifecycle.js';
 import { detectIntent } from './intent.js';
 import type { MembershipId } from './ids.js';
-import type { ChatIntent, ChatMessage, ChatMessageKind, VoiceTranscript } from './types.js';
+import type { ChatIntent, ChatMessage, ChatMessageKind, VoiceTranscript } from './domain-types.js';
 
 /**
  * Photo and voice-note media rules for Household Chat (ticket 06 — Add

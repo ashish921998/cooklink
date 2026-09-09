@@ -36,6 +36,9 @@ Thumbs.db
 coverage/
 .nyc_output/
 
+# Review tooling scratch
+.full-review/
+
 # Local DB
 *.sqlite
 *.db

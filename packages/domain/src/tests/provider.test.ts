@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { id } from '../ids.js';
+import { brandId } from '../ids.js';
 import {
   resolveMatchPlan,
+  orderableCartItems,
   buildCartUpdatePlan,
   validateCartReview,
   allResolved,
@@ -11,7 +12,7 @@ import {
   type ProviderProduct,
   type ProviderCartReview,
 } from '../provider.js';
-import type { SuggestedCartItem } from '../types.js';
+import type { SuggestedCartItem } from '../domain-types.js';
 
 /**
  * Issue 10 — pure domain tests for the Instamart product-matching journey.
@@ -23,8 +24,8 @@ import type { SuggestedCartItem } from '../types.js';
  * gates checkout on every line being resolved.
  */
 
-const HOUSEHOLD = id<'HouseholdId'>('h-1');
-const MEMBER = id<'MembershipId'>('m-1');
+const HOUSEHOLD = brandId<'HouseholdId'>('h-1');
+const MEMBER = brandId<'MembershipId'>('m-1');
 
 function makeCartItem(overrides: Partial<SuggestedCartItem> = {}): SuggestedCartItem {
   return {
@@ -36,7 +37,7 @@ function makeCartItem(overrides: Partial<SuggestedCartItem> = {}): SuggestedCart
     needDay: 'today',
     affectedMeals: [],
     confidence: 'may_be_low',
-    memberState: 'pending',
+    memberState: 'kept',
     removalReason: null,
     ...overrides,
   };
@@ -91,6 +92,18 @@ test('resolveMatchPlan: unresolved when no product chosen', () => {
   if (plan[0]!.state === 'unresolved') {
     assert.equal(plan[0]!.candidates.length, 2);
   }
+});
+
+test('orderableCartItems: excludes pending and removed lines', () => {
+  const items = orderableCartItems([
+    makeCartItem({ id: 'kept', memberState: 'kept' }),
+    makeCartItem({ id: 'pending', memberState: 'pending' }),
+    makeCartItem({ id: 'removed', memberState: 'removed', removalReason: 'already_have' }),
+  ]);
+  assert.deepEqual(
+    items.map((item) => item.id),
+    ['kept'],
+  );
 });
 
 test('resolveMatchPlan: resolved when a product is chosen and available', () => {
