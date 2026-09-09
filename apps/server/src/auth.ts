@@ -31,15 +31,18 @@ export function authMiddleware(db: Database): MiddlewareHandler<AuthEnv> {
       .where(eq(users.clerkUserId, identity.clerkUserId))
       .limit(1);
     if (!user) {
-      if (!identity.phone) {
+      const profile = identity.phone
+        ? { phone: identity.phone, displayName: identity.displayName }
+        : await fetchClerkProfile(identity.clerkUserId);
+      if (!profile?.phone) {
         return c.json({ error: 'verified_phone_required' }, 409);
       }
       try {
         await db.insert(users).values({
           id: randomUUID(),
           clerkUserId: identity.clerkUserId,
-          phone: normalizePhone(identity.phone),
-          displayName: identity.displayName || 'Cooklink user',
+          phone: normalizePhone(profile.phone),
+          displayName: profile.displayName || 'Cooklink user',
         });
       } catch {
         // A concurrent first request may have created the same Clerk profile.
@@ -93,12 +96,25 @@ export async function resolveClerkIdentity(req: Request): Promise<ClerkIdentity 
   const clerkUserId = requestState.toAuth().userId;
   if (!clerkUserId) return null;
 
+  // The signed session proves the Clerk user id. Existing Cooklink profiles
+  // are loaded from PostgreSQL by the middleware, avoiding a Clerk Management
+  // API request on every authenticated API call. The profile is fetched from
+  // Clerk only below when a user signs in for the first time.
+  return { clerkUserId, phone: null, displayName: '' };
+}
+
+async function fetchClerkProfile(
+  clerkUserId: string,
+): Promise<{ phone: string | null; displayName: string } | null> {
+  const secretKey = process.env.CLERK_SECRET_KEY;
+  const publishableKey = process.env.CLERK_PUBLISHABLE_KEY;
+  if (!secretKey || !publishableKey) return null;
+  const clerk = createClerkClient({ secretKey, publishableKey });
   const clerkUser = await clerk.users.getUser(clerkUserId);
   const phone =
     clerkUser.phoneNumbers.find((candidate) => candidate.id === clerkUser.primaryPhoneNumberId) ??
     clerkUser.phoneNumbers[0];
   return {
-    clerkUserId,
     phone: phone?.phoneNumber ?? null,
     displayName:
       [clerkUser.firstName, clerkUser.lastName].filter(Boolean).join(' ') ||

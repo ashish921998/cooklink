@@ -1,8 +1,17 @@
 import { and, eq, isNotNull, lte, or } from 'drizzle-orm';
 import type { Logger } from 'pino';
 import type { Database } from '@cooklink/db';
-import { actionSuggestions, deviceRegistrations, swiggyTokens } from '@cooklink/db';
+import {
+  actionSuggestions,
+  checkoutConfirmations,
+  deviceRegistrations,
+  swiggyOAuthCallbacks,
+  swiggyOAuthPending,
+  swiggyRecentProducts,
+  swiggyTokens,
+} from '@cooklink/db';
 import type { MediaStore } from './media.js';
+import { PRODUCT_CACHE_TTL_MS } from './flow-state.js';
 
 /**
  * Scheduled-job implementations (issue 07, AC#17).
@@ -12,9 +21,11 @@ import type { MediaStore } from './media.js';
  * job is an idempotent, self-contained function that takes a `now` timestamp
  * and a Pino logger; none of them depend on the Hono request context.
  *
- * Real Swiggy ordering is feature-gated (issue 07, AC#12); until it is
- * enabled, `pollActiveOrders` is a no-op that logs nothing, because there is
- * no MCP client to call and no placed orders to track.
+ * Real Swiggy ordering is feature-gated (issue 07, AC#12); while it is
+ * disabled (or the provider is the stub), `pollActiveOrders` is a no-op. When
+ * enabled, the poll delegates to the order tracker in `order-tracking.ts`,
+ * which re-checks placed orders with the placing member's session and
+ * persists progression with exactly-once events.
  */
 
 export interface JobResult {
@@ -25,9 +36,10 @@ export interface JobResult {
 export interface OrderTracker {
   /**
    * Poll active (placed, not yet delivered) orders. Returns the number of
-   * orders whose status was re-checked. The server-side Swiggy MCP client
-   * implements this; the default no-op tracker is used while ordering is
-   * feature-gated.
+   * orders whose status progressed (a transition was applied); skipped
+   * members and unchanged observations do not count. The server-side Swiggy
+   * MCP client implements this; the default no-op tracker is used while
+   * ordering is feature-gated.
    */
   pollActiveOrders(now: Date): Promise<JobResult>;
 }
@@ -62,6 +74,30 @@ export async function cleanupExpiredSwiggyTokens(
   const result = await db.delete(swiggyTokens).where(lte(swiggyTokens.expiresAt, now));
   const affected = Number(result.rowCount ?? 0);
   if (affected > 0) log.info({ msg: 'job.swiggy_tokens_removed', affected });
+  return { affected };
+}
+
+/**
+ * Expire the durable Swiggy flow state (issue 13): pending OAuth handshakes,
+ * browser-callback routing records, and checkout confirmations are swept once
+ * their TTL elapses; the recent-product cache ages out after its TTL. This
+ * keeps the durable stores bounded exactly like the former in-process Maps
+ * were, and the sweep is idempotent and safe to run from any instance.
+ */
+export async function cleanupExpiredFlowState(
+  db: Database,
+  now: Date,
+  log: Logger,
+): Promise<JobResult> {
+  const productCacheCutoff = new Date(now.getTime() - PRODUCT_CACHE_TTL_MS);
+  const results = await Promise.all([
+    db.delete(swiggyOAuthPending).where(lte(swiggyOAuthPending.expiresAt, now)),
+    db.delete(swiggyOAuthCallbacks).where(lte(swiggyOAuthCallbacks.expiresAt, now)),
+    db.delete(checkoutConfirmations).where(lte(checkoutConfirmations.expiresAt, now)),
+    db.delete(swiggyRecentProducts).where(lte(swiggyRecentProducts.updatedAt, productCacheCutoff)),
+  ]);
+  const affected = results.reduce((sum, result) => sum + Number(result.rowCount ?? 0), 0);
+  if (affected > 0) log.info({ msg: 'job.flow_state_removed', affected });
   return { affected };
 }
 

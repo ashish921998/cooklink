@@ -12,12 +12,15 @@
  */
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { secureHeaders } from 'hono/secure-headers';
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { sql } from 'drizzle-orm';
 import {
   Authorization,
   AuthorizationDeniedError,
   type GroceryProvider,
   type PushDispatcher,
-  type UserId,
 } from '@cooklink/domain';
 import type { Database } from '@cooklink/db';
 import type { Logger } from 'pino';
@@ -32,6 +35,7 @@ import {
   createInMemoryConfirmationStore,
   type CheckoutConfirmationStore,
 } from './checkout-confirmation-store.js';
+import { createMemoryOAuthCallbackStore, type OAuthCallbackStore } from './flow-state.js';
 import { NoopPushDispatcher } from './push-delivery.js';
 import { registerHouseholdRoutes } from './routes/households.routes.js';
 import { registerMealPlanRoutes } from './routes/meal-plan.routes.js';
@@ -44,6 +48,15 @@ import { registerGroceryCartRoutes } from './routes/grocery-cart.routes.js';
 import { registerGroceryCheckoutRoutes } from './routes/grocery-checkout.routes.js';
 import { registerSuggestedCartRoutes } from './routes/suggested-cart.routes.js';
 import { registerNotificationRoutes } from './routes/notifications.routes.js';
+import { registerWaitlistRoutes } from './routes/waitlist.routes.js';
+
+const landingRoot = fileURLToPath(new URL('../../../landing/', import.meta.url));
+const landingAssets = new Map([
+  ['tiffin-buddy.png', 'image/png'],
+  ['dal-tadka-watercolor.jpg', 'image/jpeg'],
+  ['paneer-watercolor.jpg', 'image/jpeg'],
+  ['poha-watercolor.jpg', 'image/jpeg'],
+]);
 
 export interface AppServices {
   media?: MediaStore;
@@ -58,11 +71,20 @@ export interface AppServices {
   provider?: GroceryProvider;
   /**
    * A short-lived checkout confirmation store (issue 11, AC#1/AC#2). Defaults
-   * to an in-memory store which is safe for V1 single-instance: a restart
-   * invalidates outstanding confirmations (fail-closed) and the durable
-   * idempotency key in PostgreSQL still prevents duplicate orders across restarts.
+   * to an in-memory store; production passes the durable PostgreSQL store
+   * (`createDatabaseConfirmationStore`) so confirmations survive restarts and
+   * can be consumed by any instance. Consumption is atomic and single-use in
+   * both cases, and the durable idempotency key in PostgreSQL still prevents
+   * duplicate orders across restarts.
    */
   confirmations?: CheckoutConfirmationStore;
+  /**
+   * Pending browser-OAuth callback routing for the Swiggy connect flow.
+   * Defaults to an in-memory store; production passes the durable PostgreSQL
+   * store (`createDatabaseOAuthCallbackStore`) so a handshake started on one
+   * instance can complete on another and survive a deploy mid-sign-in.
+   */
+  oauthCallbacks?: OAuthCallbackStore;
   /**
    * Feature gate for real ordering (issue 11, AC#9). Defaults to the
    * `COOKLINK_ORDERING_ENABLED` env var. When false, the checkout surface is
@@ -85,10 +107,7 @@ export function createApp(db: Database, services?: AppServices) {
   const log = services?.log ?? createLogger();
   const provider = services?.provider ?? createStubProvider();
   const confirmations = services?.confirmations ?? createInMemoryConfirmationStore();
-  const swiggyOAuthCallbacks = new Map<
-    string,
-    { userId: UserId; appReturnUri: string; createdAt: number }
-  >();
+  const swiggyOAuthCallbacks = services?.oauthCallbacks ?? createMemoryOAuthCallbackStore();
   /**
    * Issue 11, AC#9 — real ordering is visibly feature-gated until Swiggy
    * staging and production access are approved. Default to the env var.
@@ -128,6 +147,24 @@ export function createApp(db: Database, services?: AppServices) {
     }),
   );
 
+  app.use(
+    '*',
+    secureHeaders({
+      contentSecurityPolicy: {
+        defaultSrc: ["'self'"],
+        imgSrc: ["'self'", 'data:'],
+        styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+        fontSrc: ["'self'", 'https://fonts.gstatic.com'],
+        scriptSrc: ["'self'", "'unsafe-inline'"],
+        connectSrc: ["'self'"],
+        frameAncestors: ["'none'"],
+        baseUri: ["'self'"],
+        formAction: ["'self'"],
+      },
+      referrerPolicy: 'strict-origin-when-cross-origin',
+    }),
+  );
+
   // Structured request logging covers every request, including /health
   // (issue 07, AC#19 — "every request logs user, Household, route, latency,
   // and status"). The middleware reads `authUser` after `await next()`, so it
@@ -136,6 +173,28 @@ export function createApp(db: Database, services?: AppServices) {
   app.use('*', requestLogger(log));
 
   app.get('/health', (c) => c.json({ ok: true, service: 'cooklink-server' }));
+  app.get('/ready', async (c) => {
+    // Verify both database connectivity and the newest launch-critical
+    // migration before Railway sends traffic to a deployment.
+    await db.execute(sql`select 1 from waitlist_entries limit 0`);
+    return c.json({ ok: true, service: 'cooklink-server' });
+  });
+  app.get('/', async (c) => c.html(await readFile(`${landingRoot}/index.html`, 'utf8')));
+  app.get('/v2.html', async (c) => c.html(await readFile(`${landingRoot}/v2.html`, 'utf8')));
+  app.get('/assets/:asset', async (c) => {
+    const assetName = c.req.param('asset');
+    const contentType = landingAssets.get(assetName);
+    if (!contentType) return c.notFound();
+    try {
+      return c.body(await readFile(`${landingRoot}/assets/${assetName}`), 200, {
+        'Content-Type': contentType,
+        'Cache-Control': 'public, max-age=86400',
+      });
+    } catch {
+      return c.notFound();
+    }
+  });
+  registerWaitlistRoutes(app, db);
 
   app.use('/v1/*', authMiddleware(db));
 

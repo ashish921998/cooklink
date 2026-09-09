@@ -131,19 +131,20 @@ export function registerGroceryCheckoutRoutes(app: Hono<AuthEnv>, ctx: AppRouteC
     const repo = new DrizzleRepository(db);
 
     // AC#2 — a fresh, explicit Member confirmation token is required. Consuming
-    // the token makes it single-use so it cannot be replayed.
-    const confirmation = body.confirmationToken
-      ? confirmations.consume(body.confirmationToken)
+    // the token makes it single-use so it cannot be replayed. The consume is
+    // atomic and bound to the acting membership: a concurrent second request
+    // cannot spend the same token, and a foreign member can neither use nor
+    // destroy another member's confirmation.
+    const consumed = body.confirmationToken
+      ? await confirmations.consume(body.confirmationToken, principal.membershipId)
       : null;
-    if (!confirmation) {
+    if (!consumed || consumed.kind !== 'consumed') {
+      if (consumed?.kind === 'membership_mismatch') {
+        return c.json({ error: 'confirmation_membership_mismatch' }, 403);
+      }
       return c.json({ error: 'fresh_confirmation_required' }, 400);
     }
-
-    // AC#2 — the confirmation must be bound to the acting membership. This is
-    // a second line of defense behind the capability check.
-    if (confirmation.membershipId !== principal.membershipId) {
-      return c.json({ error: 'confirmation_membership_mismatch' }, 403);
-    }
+    const confirmation = consumed.confirmation;
 
     // Fetch the live cart to re-validate the confirmation against it.
     let review: ProviderCartReview;

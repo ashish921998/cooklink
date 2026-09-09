@@ -141,7 +141,9 @@ export function registerHouseholdRoutes(app: Hono<AuthEnv>, ctx: AppRouteContext
         id: randomUUID(),
         householdId,
         ...meal,
-        updatedBy: ownerMembershipId,
+        // Starter meals are machine-generated, not manually edited: `updatedBy`
+        // stays null so regeneration's "keep edited meals" rule only keeps
+        // slots a person actually changed (issue 04 — Regenerate).
       }));
       await tx.insert(households).values({
         id: householdId,
@@ -171,11 +173,7 @@ export function registerHouseholdRoutes(app: Hono<AuthEnv>, ctx: AppRouteContext
     });
 
     if (setupResult.kind === 'existing') {
-      const existingMeals = await ensureStarterPlan(
-        db,
-        setupResult.home.household,
-        setupResult.home.ownerMembershipId,
-      );
+      const existingMeals = await ensureStarterPlan(db, setupResult.home.household);
       return c.json({
         householdId: setupResult.home.household.id,
         planStart: existingMeals[0]?.date ?? todayISO(),
@@ -288,7 +286,7 @@ export function registerHouseholdRoutes(app: Hono<AuthEnv>, ctx: AppRouteContext
 }
 
 /** Seed a starter plan for a resumed household that has no meals yet. */
-async function ensureStarterPlan(db: Database, household: HouseholdRow, ownerMembershipId: string) {
+async function ensureStarterPlan(db: Database, household: HouseholdRow) {
   const existingMeals = await db
     .select()
     .from(plannedMeals)
@@ -305,7 +303,8 @@ async function ensureStarterPlan(db: Database, household: HouseholdRow, ownerMem
     id: randomUUID(),
     householdId: household.id,
     ...meal,
-    updatedBy: ownerMembershipId,
+    // Machine-generated slots are not manual edits: `updatedBy` stays null so
+    // regeneration's "keep edited meals" rule only keeps changed slots.
   }));
   await db.insert(plannedMeals).values(meals);
   return meals;

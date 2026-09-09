@@ -1,6 +1,19 @@
 import { createContext, useCallback, useContext } from 'react';
+import { assertValidMobileProductionConfig } from './config';
 
-const apiUrl = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
+// The authoritative production gate is build-time (app.config.ts, evaluated
+// by Expo/EAS for every build). This import-time gate is a bundled second
+// layer: it keys on the explicit `EXPO_PUBLIC_COOKLINK_PRODUCTION_BUILD`
+// marker inlined from the EAS production environment — not on `!__DEV__`,
+// which is also false for internal preview release builds (they keep the
+// documented localhost fallback and test keys).
+assertValidMobileProductionConfig({
+  apiUrl: process.env.EXPO_PUBLIC_API_URL,
+  clerkPublishableKey: process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY,
+  isProductionBuild: process.env.EXPO_PUBLIC_COOKLINK_PRODUCTION_BUILD === 'true',
+});
+
+export const apiUrl = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
 export const devAuthEnabled = __DEV__ && process.env.EXPO_PUBLIC_COOKLINK_DEV_AUTH === 'true';
 
 export const devAuthHeaders: Record<string, string> = devAuthEnabled

@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { swiggyTokens, type Database } from '@cooklink/db';
 import {
@@ -14,9 +14,16 @@ import {
   type ProviderProduct,
   type UserId,
 } from '@cooklink/domain';
+import { decodeSecretKey, decryptSecret, encryptSecret } from './secret-box.js';
+import {
+  OAUTH_PENDING_TTL_MS,
+  createMemoryPendingOAuthStore,
+  createMemoryProductCacheStore,
+  type PendingOAuthStore,
+  type ProductCacheStore,
+} from './flow-state.js';
 
 const DEFAULT_BASE_URL = 'https://mcp.swiggy.com';
-const OAUTH_PENDING_TTL_MS = 10 * 60_000;
 const MCP_PROTOCOL_VERSION = '2025-03-26';
 const READ_TIMEOUT_MS = 15_000;
 const MUTATION_TIMEOUT_MS = 30_000;
@@ -34,21 +41,25 @@ export interface SwiggyTokenStore {
   delete(userId: UserId): Promise<void>;
 }
 
-interface PendingOAuth {
-  userId: UserId;
-  redirectUri: string;
-  clientId: string;
-  clientSecret: string | null;
-  codeVerifier: string;
-  createdAt: number;
-}
-
 export interface SwiggyProviderOptions {
   tokenStore: SwiggyTokenStore;
   baseUrl?: string;
   fetchImpl?: typeof fetch;
   now?: () => Date;
   clientName?: string;
+  /**
+   * Where pending delegated-OAuth (PKCE) handshakes live. Defaults to an
+   * in-process store; production passes the durable PostgreSQL store
+   * (`createDatabasePendingOAuthStore`) so sign-in survives restarts and works
+   * across independent instances. Verifiers/secrets are encrypted at rest.
+   */
+  pendingOAuthStore?: PendingOAuthStore;
+  /**
+   * The recent-product cache behind unavailable-product alternatives.
+   * Defaults to an in-process cache; production passes the durable
+   * PostgreSQL cache (`createDatabaseProductCacheStore`).
+   */
+  productCache?: ProductCacheStore;
 }
 
 /**
@@ -59,7 +70,7 @@ export function createDatabaseSwiggyTokenStore(
   db: Database,
   encryptionKey: string,
 ): SwiggyTokenStore {
-  const key = decodeEncryptionKey(encryptionKey);
+  const key = decodeSecretKey(encryptionKey);
   return {
     async get(userId) {
       const [row] = await db
@@ -74,7 +85,7 @@ export function createDatabaseSwiggyTokenStore(
       }
       try {
         return {
-          accessToken: decryptToken(row.encryptedAccessToken, key),
+          accessToken: decryptSecret(row.encryptedAccessToken, key),
           expiresAt: row.expiresAt,
         };
       } catch {
@@ -85,7 +96,7 @@ export function createDatabaseSwiggyTokenStore(
       }
     },
     async set(userId, token) {
-      const encryptedAccessToken = encryptToken(token.accessToken, key);
+      const encryptedAccessToken = encryptSecret(token.accessToken, key);
       await db
         .insert(swiggyTokens)
         .values({
@@ -111,8 +122,8 @@ export function createSwiggyProvider(options: SwiggyProviderOptions): GroceryPro
   const fetchImpl = options.fetchImpl ?? fetch;
   const now = options.now ?? (() => new Date());
   const clientName = options.clientName ?? 'Cooklink';
-  const pendingOAuth = new Map<string, PendingOAuth>();
-  const recentProducts = new Map<string, Map<string, ProviderProduct>>();
+  const pendingOAuth = options.pendingOAuthStore ?? createMemoryPendingOAuthStore();
+  const recentProducts = options.productCache ?? createMemoryProductCacheStore();
 
   async function getToken(userId: UserId): Promise<StoredSwiggyToken> {
     const token = await options.tokenStore.get(userId);
@@ -234,14 +245,18 @@ export function createSwiggyProvider(options: SwiggyProviderOptions): GroceryPro
       const codeVerifier = randomBytes(32).toString('base64url');
       const codeChallenge = createHash('sha256').update(codeVerifier).digest('base64url');
       const state = randomUUID();
-      pendingOAuth.set(state, {
-        userId: memberUserId,
-        redirectUri,
-        clientId: registration.clientId,
-        clientSecret: registration.clientSecret,
-        codeVerifier,
-        createdAt: now().getTime(),
-      });
+      await pendingOAuth.save(
+        state,
+        {
+          userId: memberUserId,
+          redirectUri,
+          clientId: registration.clientId,
+          clientSecret: registration.clientSecret,
+          codeVerifier,
+          createdAt: now().getTime(),
+        },
+        OAUTH_PENDING_TTL_MS,
+      );
       const authorizationUrl = new URL(`${baseUrl}/auth/authorize`);
       authorizationUrl.search = new URLSearchParams({
         response_type: 'code',
@@ -256,13 +271,12 @@ export function createSwiggyProvider(options: SwiggyProviderOptions): GroceryPro
     },
 
     async completeOAuth({ memberUserId, code, state }) {
-      const pending = pendingOAuth.get(state);
-      pendingOAuth.delete(state);
-      if (
-        !pending ||
-        pending.userId !== memberUserId ||
-        now().getTime() - pending.createdAt > OAUTH_PENDING_TTL_MS
-      ) {
+      // Atomic single-use consume bound to the acting member: a replayed
+      // state, a concurrent duplicate callback, an expired handshake, or a
+      // different member presenting the state all fail closed here — and a
+      // wrong-member attempt never burns the owner's handshake.
+      const pending = await pendingOAuth.consume(state, memberUserId);
+      if (!pending || now().getTime() - pending.createdAt > OAUTH_PENDING_TTL_MS) {
         throw new ProviderError('Swiggy OAuth session expired', 'expired_session', 401);
       }
       const body: JsonRecord = {
@@ -305,7 +319,7 @@ export function createSwiggyProvider(options: SwiggyProviderOptions): GroceryPro
         }).catch(() => undefined);
       }
       await options.tokenStore.delete(userId);
-      recentProducts.delete(userId as string);
+      await recentProducts.clear(userId);
     },
 
     async getAddresses(userId) {
@@ -329,10 +343,7 @@ export function createSwiggyProvider(options: SwiggyProviderOptions): GroceryPro
       const direct = flattenProducts(arrayValue(data.products), addressId, false);
       const similar = flattenProducts(arrayValue(data.similarProducts), addressId, true);
       const products = [...direct, ...similar];
-      const cache =
-        recentProducts.get(memberUserId as string) ?? new Map<string, ProviderProduct>();
-      for (const product of products) cache.set(product.id, product);
-      recentProducts.set(memberUserId as string, cache);
+      await recentProducts.remember(memberUserId, products);
       return products;
     },
 
@@ -366,7 +377,7 @@ export function createSwiggyProvider(options: SwiggyProviderOptions): GroceryPro
     },
 
     async getAlternatives({ memberUserId, addressId, productId }) {
-      const cached = recentProducts.get(memberUserId as string)?.get(productId);
+      const cached = await recentProducts.get(memberUserId, productId);
       if (!cached) return [];
       const products = await this.searchProducts({
         memberUserId,
@@ -801,39 +812,6 @@ function classifyProviderError(message: string): ProviderError {
     return new ProviderError(message, 'cart_empty', 400);
   }
   return new ProviderError(message, 'upstream_error', 502);
-}
-
-function decodeEncryptionKey(value: string): Buffer {
-  const key = Buffer.from(value, 'base64');
-  if (key.length !== 32) {
-    throw new Error('SWIGGY_TOKEN_ENCRYPTION_KEY must be a base64-encoded 32-byte key.');
-  }
-  return key;
-}
-
-function encryptToken(value: string, key: Buffer): string {
-  const iv = randomBytes(12);
-  const cipher = createCipheriv('aes-256-gcm', key, iv);
-  const encrypted = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()]);
-  return [
-    'v1',
-    iv.toString('base64url'),
-    cipher.getAuthTag().toString('base64url'),
-    encrypted.toString('base64url'),
-  ].join('.');
-}
-
-function decryptToken(value: string, key: Buffer): string {
-  const [version, ivValue, tagValue, encryptedValue] = value.split('.');
-  if (version !== 'v1' || !ivValue || !tagValue || !encryptedValue) {
-    throw new Error('Stored Swiggy token has an unsupported encryption envelope.');
-  }
-  const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(ivValue, 'base64url'));
-  decipher.setAuthTag(Buffer.from(tagValue, 'base64url'));
-  return Buffer.concat([
-    decipher.update(Buffer.from(encryptedValue, 'base64url')),
-    decipher.final(),
-  ]).toString('utf8');
 }
 
 function isRecord(value: unknown): value is JsonRecord {

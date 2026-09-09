@@ -1,9 +1,10 @@
 import type { Database } from '@cooklink/db';
-import type { Authorization, GroceryProvider, PushDispatcher, UserId } from '@cooklink/domain';
+import type { Authorization, GroceryProvider, PushDispatcher } from '@cooklink/domain';
 import type { Logger } from 'pino';
 import type { MediaStore } from '../media.js';
 import type { TranscriptionService } from '../transcription.js';
 import type { CheckoutConfirmationStore } from '../checkout-confirmation-store.js';
+import type { OAuthCallbackStore } from '../flow-state.js';
 
 /**
  * The wiring every Cooklink API route module receives from `createApp`.
@@ -31,16 +32,10 @@ export interface AppRouteContext {
   /**
    * Pending browser-OAuth handshakes for the Swiggy connect flow, keyed by
    * `state`. Shared between the connect route (which records them) and the
-   * `/oauth/swiggy/callback` route (which consumes them).
+   * `/oauth/swiggy/callback` route (which consumes them atomically). Durable
+   * in production so handshakes survive restarts and work across instances.
    */
-  swiggyOAuthCallbacks: Map<string, SwiggyOAuthCallback>;
-}
-
-/** One pending Swiggy browser-OAuth handshake awaiting its callback. */
-export interface SwiggyOAuthCallback {
-  userId: UserId;
-  appReturnUri: string;
-  createdAt: number;
+  swiggyOAuthCallbacks: OAuthCallbackStore;
 }
 
 /**

@@ -171,7 +171,7 @@ export function planRegeneration(
 ): RegeneratePlan {
   const drafts = new Map<string, RegenerateDraft>();
   if (input.seed) {
-    for (const draft of generateStarterPlan(input.today, input.seed)) {
+    for (const draft of generateStarterPlan(input.today, input.seed, plan)) {
       drafts.set(`${draft.date}|${draft.mealType}`, {
         recipeId: draft.recipeId,
         name: draft.name,

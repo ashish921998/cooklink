@@ -12,11 +12,12 @@ import { Scheduler, JOB_INTERVALS, createScheduler } from '../scheduler.js';
 
 const silentLogger = pino({ level: 'silent' });
 
-test('createScheduler registers all six V1 jobs', () => {
+test('createScheduler registers all seven V1 jobs', () => {
   const fakeDb = {} as never;
   const fakeMedia = {} as never;
   const scheduler = createScheduler(fakeDb, { media: fakeMedia }, silentLogger);
   assert.deepEqual(scheduler.jobNames.sort(), [
+    'flow_state_cleanup',
     'media_ttl_sweep',
     'order_tracking_poll',
     'push_token_cleanup',

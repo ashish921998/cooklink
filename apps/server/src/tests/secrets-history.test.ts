@@ -148,6 +148,17 @@ test('git history does not flag the reviewed Clerk test placeholder', () => {
   }
 });
 
+test('git history does not flag the reviewed OAuth test token', () => {
+  const root = makeTempRepo();
+  try {
+    commit(root, 'provider.test.ts', "return { access_token: 'test-access-token' };\n", 'fixture');
+    const violations = grepGitHistory(root);
+    assert.equal(violations.length, 0, 'reviewed test-access-token must be allowlisted');
+  } finally {
+    removeTempRepo(root);
+  }
+});
+
 test('git history still flags a real-shaped Clerk test key (no prefix allowlist)', () => {
   // Proves the reconciliation does NOT broadly allowlist the `sk_test_` prefix:
   // only the exact `sk_test_placeholder` string is excluded. A real-shaped key

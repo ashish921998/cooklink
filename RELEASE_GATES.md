@@ -4,6 +4,29 @@ This document states exactly what is locally proven, what is feature-gated, and
 what still requires account-level production approval before V1 ships. It is
 the handoff evidence for issue 13.
 
+## Capacity readiness update (2026-08-23)
+
+**Status: hardened for a controlled single-replica beta; not approved for a
+1,000–10,000-person public V1.**
+
+The V1 target and measurable capacity gates are maintained in
+[`V1_CAPACITY.md`](./V1_CAPACITY.md). The current baseline served 1,000 public
+health requests at concurrency 25 with 100% success, 89.34 requests/second,
+394.62 ms p95 latency, and 622.07 ms p99 latency. This proves the Railway edge
+and process health path only; database-backed authenticated staging flows still
+require the ten-minute workload defined in that document.
+
+Launch hardening now includes a migration pre-deploy command, a database-backed
+readiness check, bounded PostgreSQL pooling, security headers, waitlist body and
+IP limits, a bot honeypot, and a repeatable load-smoke command. Authentication
+no longer calls the Clerk Management API for every established-user request.
+
+Public launch remains blocked by production Clerk credentials, an empty EAS
+production environment, missing error-capture configuration, non-durable Chat
+media, privacy/account deletion, physical-device validation, and the external
+provider approvals below. Do not add a second server replica while the
+process-local constraints in `V1_CAPACITY.md` remain.
+
 ## Distribution readiness (2026-08-21)
 
 **Status: blocked for public distribution; locally buildable and linked to EAS.**
@@ -35,9 +58,80 @@ Public distribution still requires the following account and product gates:
   App Review contact/demo-account details.
 - Complete physical-device media/auth/accessibility checks and the external
   provider/content gates already listed below.
-- Persist Swiggy OAuth/PKCE transactions before enabling more than one server
-  replica. The current ten-minute transaction state is process-local, so a
-  deploy or restart during sign-in requires the member to start again.
+- ~~Persist Swiggy OAuth/PKCE transactions before enabling more than one server
+  replica~~ (resolved 2026-09-09: pending OAuth handshakes, browser-callback
+  routing, the recent-product cache, and checkout confirmations are durable in
+  PostgreSQL and consumed atomically — see the section below). Replica count
+  is still limited by the remaining process-local constraints in
+  `V1_CAPACITY.md` (Chat media, scheduler lease, waitlist throttling).
+
+## Order tracking, durable flow state, and config validation (2026-09-09)
+
+**Status: locally proven against disposable PostgreSQL.**
+
+- **Background grocery order tracking.** The scheduler's `order_tracking_poll`
+  now drives a real tracker (`apps/server/src/order-tracking.ts`) when real
+  ordering is enabled and a non-stub provider is configured; it stays a no-op
+  under the feature gate otherwise. It re-checks `placed` orders with the
+  placing member's own Swiggy session, persists progression through the
+  existing `grocery_order.delivery_updated` / `grocery_order.failed` system
+  events, and is read-only towards the provider — it never submits, retries,
+  or cancels. Work claiming is a real database lease: each poll claims up to
+  100 eligible orders with `FOR UPDATE SKIP LOCKED` and stamps their
+  `tracked_at`. A transaction-scoped member advisory lock also prevents
+  overlapping provider requests after claim expiry, and
+  the least-recently-attempted orders (including orders whose member errored
+  or that are absent from the provider's history) are picked first — the
+  100-order bound cannot starve later orders. Status transitions are monotonic
+  against the observed state (`placed < confirmed < out_for_delivery <
+  delivered/terminal`), re-read under a row lock, so a stale replica response
+  can never regress a confirmed/out_for_delivery order or re-emit its event
+  later. Rate limits back the whole poll off until the next cycle; expired
+  sessions and transient upstream errors skip only the affected member;
+  terminal orders stop being polled. Evidence: `order-tracking.test.ts`
+  (Postgres-backed; includes stale-response, cross-instance lease, and
+  150-order fairness cases).
+- **Durable Swiggy flow state.** The process-local Maps for pending OAuth
+  (PKCE), browser-callback routing, recent products, and checkout
+  confirmations are replaced by PostgreSQL tables (migration
+  `0002_durable_flow_state_order_tracking`: `swiggy_oauth_pending`,
+  `swiggy_oauth_callbacks`, `swiggy_recent_products`,
+  `checkout_confirmations`). PKCE verifiers and client secrets are encrypted
+  at rest (AES-256-GCM, never logged). OAuth states and confirmations are
+  consumed atomically (delete-and-return), a wrong-member callback can neither
+  use nor burn another member's handshake or confirmation, and TTLs are swept
+  by the new `flow_state_cleanup` scheduler job. Sign-in and checkout now
+  survive restarts and work across independent instances. Evidence:
+  `flow-state.durable.test.ts` (cross-instance recovery, expiry, replay,
+  cross-user denial, over isolated local PostgreSQL).
+- **Production configuration validation.** The server refuses to start on
+  inconsistent configuration (`apps/server/src/config.ts`): an unknown
+  `COOKLINK_SWIGGY_MODE`, a missing explicit mode in `NODE_ENV=production`
+  deployments (the stub default is a development/preview convenience only), a
+  misspelled `COOKLINK_ORDERING_ENABLED` value (anything but exactly `true` /
+  `false` is rejected, not silently treated as `false`),
+  `COOKLINK_ORDERING_ENABLED=true` with the stub provider (an intended live
+  deployment must never silently fall back to stub), and a missing/invalid
+  `SWIGGY_TOKEN_ENCRYPTION_KEY` for a real provider. Explicitly configured
+  stub deployments with ordering disabled remain fully supported. Startup
+  consumes one parsed/normalized config (`parseServerConfig`), so runtime
+  behavior cannot diverge from the validated values (e.g. by reading an
+  untrimmed raw value). Mobile production configuration is validated at
+  **build time** by the Expo/EAS config entrypoint
+  (`apps/mobile/app.config.ts`): a `production` EAS build (detected via the
+  built-in `EAS_BUILD_PROFILE` and the explicit bundled
+  `EXPO_PUBLIC_COOKLINK_PRODUCTION_BUILD` marker set in the eas.json
+  production profile/environment — never via `!__DEV__`, which also holds for
+  internal preview release builds) fails the build on a missing or
+  non-HTTPS/localhost API origin (including IPv6/IPv4 loopback variants and
+  localhost subdomains), an origin embedding credentials, a query, a fragment,
+  or a path, or a missing Clerk publishable key. A bundled runtime gate in the
+  API client (keyed on the same marker) is a second layer. Development and
+  preview builds keep the localhost fallback and test keys. Errors are
+  actionable and secret-free (values are never echoed). Evidence: config
+  matrix tests in `apps/server/src/tests/config.test.ts` and
+  `apps/mobile/src/tests/config.test.ts` (the latter drives the real
+  `app.config.ts` entrypoint).
 
 ## Summary
 
@@ -50,6 +144,9 @@ Public distribution still requires the following account and product gates:
 | Secret-free working tree | Locally proven (mobile tree only) | `secrets-grep.ts` + `secrets-grep.test.ts` |
 | Secret-free git history | Locally proven | `secrets-history.ts` + `secrets-history.test.ts` (8 tests; reconciled `sk_test_placeholder` fixture) |
 | Recovery scenarios | Locally proven | `recovery-scenarios.test.ts` (14 tests) |
+| Background order tracking | Locally proven | `order-tracking.test.ts` (Postgres-backed; progression, monotonic exactly-once events, DB claim lease across replicas, fair 100-order bound, backoff, read-only provider) |
+| Durable Swiggy flow state | Locally proven | `flow-state.durable.test.ts` (cross-instance, expiry, replay, cross-user denial) + migration `0002_durable_flow_state_order_tracking` |
+| Production config validation | Locally proven | `config.test.ts` matrices (server + mobile, incl. the real `app.config.ts` entrypoint); startup gate in `index.ts`, build-time gate in `app.config.ts`, bundled runtime gate in mobile `api.ts` |
 | Native Chat media (photo + voice) | Implemented; device validation pending | `apps/mobile/src/lib/media.ts` (expo-image-picker, expo-audio) |
 | Swiggy staging | Externally blocked | No production access yet |
 | OAuth callback | Externally blocked | Requires Swiggy approval |
@@ -177,7 +274,7 @@ Two scanners guard the repository:
    from every commit diff. Flags HIGH_ENTROPY literals and ASSIGNMENT patterns.
    The full Cooklink repository history passes clean (verified in test).
 
-Both scanners run as part of the test suite (`secrets-grep.test.ts` with 4
+Both scanners run as part of the test suite (`secrets-grep.test.ts` with 7
 tests and `secrets-history.test.ts` with 8 tests).
 
 **Reconciled fixture:** commit `6133fa8` introduced

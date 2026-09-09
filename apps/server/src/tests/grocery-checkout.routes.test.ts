@@ -81,6 +81,28 @@ test(
         },
       ]);
 
+      // Review the Suggested Grocery Cart: the approved requests build pending
+      // lines, and a Member keeps each line during review before it may reach
+      // provider matching (ticket 09, AC#6 — the cart becomes an order only
+      // after a Member reviews it).
+      const cartRes = await app.request(`/v1/households/${householdId}/suggested-cart`, {
+        headers: ownerHeaders,
+      });
+      assert.equal(cartRes.status, 200);
+      const cart = (await cartRes.json()) as { items: { id: string }[] };
+      assert.equal(cart.items.length, 2);
+      for (const item of cart.items) {
+        const keepRes = await app.request(
+          `/v1/households/${householdId}/suggested-cart/${item.id}`,
+          {
+            method: 'PATCH',
+            headers: ownerHeaders,
+            body: JSON.stringify({ state: 'kept' }),
+          },
+        );
+        assert.equal(keepRes.status, 200);
+      }
+
       // Invite a Cook so we can verify Cooks are denied checkout (AC#2).
       const inviteRes = await app.request(`/v1/households/${householdId}/invites`, {
         method: 'POST',
@@ -407,7 +429,7 @@ test(
   },
 );
 
-test('in-memory confirmation store issues and consumes single-use tokens', () => {
+test('in-memory confirmation store issues and consumes single-use tokens', async () => {
   const store = createInMemoryConfirmationStore();
   const now = new Date();
   const confirmation = {
@@ -423,10 +445,10 @@ test('in-memory confirmation store issues and consumes single-use tokens', () =>
     issuedAt: now.toISOString(),
     expiresAt: new Date(now.getTime() + 60_000).toISOString(),
   };
-  store.issue(confirmation);
-  const first = store.consume('tok-1');
-  assert.ok(first);
+  await store.issue(confirmation);
+  const first = await store.consume('tok-1');
+  assert.ok(first && first.kind === 'consumed');
   // Single-use: a second consume returns null (no replay).
-  const second = store.consume('tok-1');
+  const second = await store.consume('tok-1');
   assert.equal(second, null);
 });

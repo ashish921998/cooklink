@@ -4,7 +4,7 @@ Cooklink coordinates everyday meal planning, cooking, and grocery replenishment
 for one household and its hired cook.
 
 This repository contains the V1 implementation: one **Expo** iOS/Android app
-and one **TypeScript / Hono / Drizzle** backend over **PlanetScale MySQL**.
+and one **TypeScript / Hono / Drizzle** backend over **PlanetScale Postgres**.
 
 > The product and technical decisions live in
 > [`CONTEXT.md`](./CONTEXT.md), [`spec.md`](./.scratch/cooklink-v1/spec.md),
@@ -19,7 +19,7 @@ apps/
   server/    Hono API + Swiggy MCP/ElevenLabs/AI clients (server-side only)
 packages/
   domain/    Pure domain logic, types, authorization (zero infra, fully tested)
-  db/        Drizzle MySQL schema, migrations, seed
+  db/        Drizzle PostgreSQL schema, migrations, seed
 ```
 
 Authorization is enforced **in the application server** against the
@@ -35,7 +35,7 @@ pnpm install
 
 # Backend
 pnpm db:generate        # generate Drizzle migrations
-pnpm db:migrate         # apply to a local MySQL (DATABASE_URL)
+pnpm db:migrate         # apply to a local PostgreSQL (DATABASE_URL)
 pnpm db:seed            # seed minimal dev data
 pnpm dev:server         # http://localhost:3000
 
@@ -50,7 +50,20 @@ pnpm dev:mobile         # Expo dev server
 ```
 
 See [`apps/server/.env.example`](./apps/server/.env.example) for configuration.
-No provider secret is ever placed in the mobile bundle or an `EXPO_PUBLIC_*`
+The server validates its provider configuration at startup (provider mode —
+required explicitly in `NODE_ENV=production` deployments, encryption key for a
+real provider, and `COOKLINK_ORDERING_ENABLED=true` with the stub provider is
+rejected — a live deployment never silently falls back to stub; misspelled
+boolean values like `True` are rejected rather than silently treated as
+`false`). The mobile production configuration is validated at **build time**
+by the Expo/EAS config entrypoint (`apps/mobile/app.config.ts`): a
+`production` EAS build (by `EAS_BUILD_PROFILE` or the bundled
+`EXPO_PUBLIC_COOKLINK_PRODUCTION_BUILD` marker) fails the build on a missing
+or non-HTTPS/localhost API origin, an origin that embeds credentials, a query,
+a fragment, or a path, or a missing Clerk publishable key, while development
+and preview builds keep the localhost fallback. No provider secret is ever
+placed in the mobile
+bundle or an `EXPO_PUBLIC_*`
 variable; a CI grep test enforces this.
 
 ## Status

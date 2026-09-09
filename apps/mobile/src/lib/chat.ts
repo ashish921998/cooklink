@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { devAuthHeaders, useApi, useTokenResolver } from './api';
-
-const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
+import { apiUrl as API_URL, devAuthHeaders, useApi, useTokenResolver } from './api';
 
 /**
  * Household Chat client (issue 04 — text chat; ticket 06 — photo and voice).

@@ -13,6 +13,16 @@ test('health route is public JSON', async () => {
   assert.deepEqual(await res.json(), { ok: true, service: 'cooklink-server' });
 });
 
+test('application responses include production security headers', async () => {
+  const app = createApp({} as ReturnType<typeof createDatabase>);
+  const response = await app.request('/health');
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
+  assert.equal(response.headers.get('referrer-policy'), 'strict-origin-when-cross-origin');
+  assert.match(response.headers.get('content-security-policy') ?? '', /default-src 'self'/);
+});
+
 test(
   'new household starter plan is inaccessible to another authenticated person',
   { skip: process.env.DATABASE_URL ? false : 'DATABASE_URL is required for Postgres app tests' },

@@ -6,11 +6,17 @@
   "build": {
     "preview": {
       "distribution": "internal",
-      "environment": "preview"
+      "environment": "preview",
+      "env": {
+        "EXPO_PUBLIC_COOKLINK_PRODUCTION_BUILD": "false"
+      }
     },
     "production": {
       "autoIncrement": true,
-      "environment": "production"
+      "environment": "production",
+      "env": {
+        "EXPO_PUBLIC_COOKLINK_PRODUCTION_BUILD": "true"
+      }
     }
   },
   "submit": {

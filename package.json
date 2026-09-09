@@ -18,7 +18,8 @@
     "db:migrate": "pnpm --filter @cooklink/db migrate",
     "db:seed": "pnpm --filter @cooklink/db seed",
     "secrets:check": "pnpm --filter @cooklink/server secrets:check",
-    "secrets:grep": "pnpm --filter @cooklink/server secrets:grep"
+    "secrets:grep": "pnpm --filter @cooklink/server secrets:grep",
+    "load:smoke": "node scripts/load-smoke.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.14.0",

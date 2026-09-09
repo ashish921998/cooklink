@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { createDatabase, plannedMeals, recipes } from '@cooklink/db';
 import { todayISO, addDays } from '@cooklink/domain';
 import { createApp } from '../app.js';
@@ -134,20 +134,23 @@ test(
 
       // Checklist item 2 — search and replace. Seed two recipes so the
       // Household's vegetarian diet ranks first and an out-of-diet match is
-      // surfaced but flagged.
+      // surfaced but flagged. The recipe library is global, so the names carry
+      // the run-unique suffix and the search query matches only this run's
+      // recipes (re-running against a persistent database must not see stale
+      // rows from an earlier run).
       const vegRecipe = await seedRecipe(db, {
-        name: 'Palak Paneer',
+        name: `Palak Paneer ${suffix}`,
         dietStyle: 'vegetarian',
         mealTypes: ['dinner'],
       });
       const nonVegRecipe = await seedRecipe(db, {
-        name: 'Chicken Paneer',
+        name: `Chicken Paneer ${suffix}`,
         dietStyle: 'nonvegetarian',
         mealTypes: ['dinner'],
       });
 
       const searchRes = await app.request(
-        `/v1/households/${householdId}/meal-plan/search?q=paneer`,
+        `/v1/households/${householdId}/meal-plan/search?q=${encodeURIComponent(`paneer ${suffix}`)}`,
         { headers: ownerHeaders },
       );
       assert.equal(searchRes.status, 200);
@@ -266,7 +269,14 @@ test(
           version: 1,
           updatedBy: null,
         })
-        .then(() => db.select().from(plannedMeals).where(eq(plannedMeals.date, pastDate)));
+        .then(() =>
+          // Household-scoped: a persistent database may hold other
+          // households' meals on the same calendar date.
+          db
+            .select()
+            .from(plannedMeals)
+            .where(and(eq(plannedMeals.householdId, householdId), eq(plannedMeals.date, pastDate))),
+        );
       void pastMeal;
       const pastRegenRes = await app.request(`/v1/households/${householdId}/meal-plan/regenerate`, {
         method: 'POST',

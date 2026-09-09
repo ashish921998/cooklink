@@ -8,7 +8,7 @@
  * the push level so a muted person still sees the correct badge.
  */
 import { randomUUID } from 'node:crypto';
-import { and, count, eq, gt, isNull } from 'drizzle-orm';
+import { and, count, eq, gt, isNull, ne } from 'drizzle-orm';
 import type { Hono } from 'hono';
 import { brandId, type NotificationLevel } from '@cooklink/domain';
 import { chatMessages, deviceRegistrations, householdMemberState, memberships } from '@cooklink/db';
@@ -179,7 +179,9 @@ export function registerNotificationRoutes(app: Hono<AuthEnv>, ctx: AppRouteCont
    * Unread message count for the current user in a household (issue 12,
    * AC#8 — muted notifications preserve correct in-app unread). The count is
    * independent of the push notification level so a muted person still sees
-   * the correct unread badge in-app.
+   * the correct unread badge in-app. A message the caller sent themselves is
+   * never unread for them (AC#8 — your own send does not badge your own
+   * inbox), so own messages are excluded from the count.
    */
   app.get('/v1/households/:householdId/unread', async (c) => {
     const user = c.get('authUser');
@@ -205,7 +207,11 @@ export function registerNotificationRoutes(app: Hono<AuthEnv>, ctx: AppRouteCont
         .select({ value: count() })
         .from(chatMessages)
         .where(
-          and(eq(chatMessages.householdId, principal.householdId), isNull(chatMessages.deletedAt)),
+          and(
+            eq(chatMessages.householdId, principal.householdId),
+            isNull(chatMessages.deletedAt),
+            ne(chatMessages.senderId, principal.membershipId),
+          ),
         );
       unreadCount = Number(agg?.value ?? 0);
     } else {
@@ -223,6 +229,7 @@ export function registerNotificationRoutes(app: Hono<AuthEnv>, ctx: AppRouteCont
             eq(chatMessages.householdId, principal.householdId),
             isNull(chatMessages.deletedAt),
             gt(chatMessages.serverCreatedAt, cutoff),
+            ne(chatMessages.senderId, principal.membershipId),
           ),
         );
       unreadCount = Number(agg?.value ?? 0);

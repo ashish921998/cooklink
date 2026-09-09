@@ -36,15 +36,16 @@ export function registerGroceryProviderRoutes(app: Hono<AuthEnv>, ctx: AppRouteC
    * Browser-facing OAuth callback. Swiggy accepts localhost/HTTPS callbacks,
    * not arbitrary app schemes, so the server exchanges the code and then
    * returns the member to Cooklink without exposing the authorization code to
-   * the mobile app.
+   * the mobile app. The callback record is consumed atomically (single-use,
+   * TTL-enforced in the durable store), so a replayed or concurrent callback
+   * fails closed.
    */
   app.get('/oauth/swiggy/callback', async (c) => {
     const state = c.req.query('state') ?? '';
     const code = c.req.query('code') ?? '';
     const oauthError = c.req.query('error') ?? '';
-    const pending = swiggyOAuthCallbacks.get(state);
-    swiggyOAuthCallbacks.delete(state);
-    if (!pending || Date.now() - pending.createdAt > 10 * 60_000) {
+    const pending = await swiggyOAuthCallbacks.consume(state);
+    if (!pending) {
       return c.text(
         'This Cooklink Swiggy sign-in has expired. Return to Cooklink and try again.',
         400,
@@ -98,12 +99,14 @@ export function registerGroceryProviderRoutes(app: Hono<AuthEnv>, ctx: AppRouteC
         redirectUri,
       });
       if (appReturnUri) {
-        swiggyOAuthCallbacks.set(result.state, {
-          userId: principal.userId,
-          appReturnUri,
-          createdAt: Date.now(),
-        });
-        setTimeout(() => swiggyOAuthCallbacks.delete(result.state), 10 * 60_000).unref?.();
+        await swiggyOAuthCallbacks.save(
+          result.state,
+          {
+            userId: principal.userId,
+            appReturnUri,
+          },
+          10 * 60_000,
+        );
       }
       return c.json(result);
     } catch (err) {

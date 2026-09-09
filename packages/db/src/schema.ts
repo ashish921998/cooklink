@@ -13,6 +13,7 @@ import {
   text,
   foreignKey,
   check,
+  primaryKey,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
@@ -114,6 +115,17 @@ export const users = pgTable(
     createdAt: now(),
   },
   (t) => ({ clerkIdx: uniqueIndex('clerkIdx').on(t.clerkUserId) }),
+);
+
+export const waitlistEntries = pgTable(
+  'waitlist_entries',
+  {
+    id: id(),
+    email: varchar('email', { length: 320 }).notNull(),
+    source: varchar('source', { length: 64 }).notNull().default('landing'),
+    createdAt: now(),
+  },
+  (t) => ({ emailIdx: uniqueIndex('waitlist_entries_email_idx').on(t.email) }),
 );
 
 export const households = pgTable('households', {
@@ -311,6 +323,11 @@ export const groceryOrders = pgTable(
     providerOrderId: varchar('provider_order_id', { length: 128 }),
     status: groceryOrderStatusEnum('status').notNull().default('pending'),
     totalCents: bigint('total_cents', { mode: 'number' }),
+    // Background order tracking (issue 07): the last provider status the
+    // tracker observed. Event emission is keyed on this column so a status is
+    // never announced twice, including across independent server instances.
+    providerStatus: varchar('provider_status', { length: 32 }),
+    trackedAt: timestamp('tracked_at', { mode: 'date', withTimezone: true }),
     createdAt: now(),
   },
   (t) => ({
@@ -520,5 +537,102 @@ export const checkoutAudit = pgTable(
       'checkout_audit_cart_total_cents_nonneg',
       sql`${t.cartTotalCents} >= 0`,
     ),
+  }),
+);
+
+// ---- durable provider flow state (survives restarts; safe across replicas) ----
+//
+// These tables replace the former process-local Maps that held in-flight
+// Swiggy OAuth handshakes, browser-callback routing, the recent-product
+// cache, and checkout confirmations. Every row carries an explicit `expiresAt`
+// so the `flow_state_cleanup` job can sweep expired state. PKCE verifiers and
+// client secrets are stored encrypted (AES-256-GCM, same envelope as
+// `swiggy_tokens`); they are never logged.
+
+/**
+ * A pending Swiggy delegated-OAuth handshake (PKCE), keyed by the opaque
+ * `state` value. Consumed exactly once by `completeOAuth` via an atomic
+ * delete-and-return, so a replay or a concurrent second callback cannot
+ * exchange the same authorization code twice.
+ */
+export const swiggyOAuthPending = pgTable(
+  'swiggy_oauth_pending',
+  {
+    state: varchar('state', { length: 128 }).primaryKey(),
+    userId: uuid('user_id').notNull(),
+    redirectUri: varchar('redirect_uri', { length: 512 }).notNull(),
+    clientId: varchar('client_id', { length: 256 }).notNull(),
+    encryptedClientSecret: text('encrypted_client_secret'),
+    encryptedCodeVerifier: text('encrypted_code_verifier').notNull(),
+    createdAt: now(),
+    expiresAt: timestamp('expires_at', { mode: 'date', withTimezone: true }).notNull(),
+  },
+  (t) => ({
+    userFk: foreignKey({ columns: [t.userId], foreignColumns: [users.id] }),
+    expiresIdx: index('swiggyOAuthPendingExpiresIdx').on(t.expiresAt),
+  }),
+);
+
+/**
+ * A pending browser-OAuth callback binding: which member's browser session to
+ * return to, keyed by the OAuth `state`. Consumed exactly once by the
+ * `/oauth/swiggy/callback` route.
+ */
+export const swiggyOAuthCallbacks = pgTable(
+  'swiggy_oauth_callbacks',
+  {
+    state: varchar('state', { length: 128 }).primaryKey(),
+    userId: uuid('user_id').notNull(),
+    appReturnUri: varchar('app_return_uri', { length: 512 }).notNull(),
+    createdAt: now(),
+    expiresAt: timestamp('expires_at', { mode: 'date', withTimezone: true }).notNull(),
+  },
+  (t) => ({
+    userFk: foreignKey({ columns: [t.userId], foreignColumns: [users.id] }),
+    expiresIdx: index('swiggyOAuthCallbacksExpiresIdx').on(t.expiresAt),
+  }),
+);
+
+/**
+ * A short-lived, single-use checkout confirmation (issue 11). The full
+ * `CheckoutConfirmation` snapshot is stored as JSONB. `consume` is an atomic
+ * delete-and-return bound to the issuing membership, so a confirmation is
+ * consumed exactly once and can never be spent by a different member.
+ */
+export const checkoutConfirmations = pgTable(
+  'checkout_confirmations',
+  {
+    token: varchar('token', { length: 128 }).primaryKey(),
+    membershipId: uuid('membership_id').notNull(),
+    householdId: uuid('household_id').notNull(),
+    snapshot: jsonb('snapshot').$type<unknown>().notNull(),
+    createdAt: now(),
+    expiresAt: timestamp('expires_at', { mode: 'date', withTimezone: true }).notNull(),
+  },
+  (t) => ({
+    householdFk: foreignKey({ columns: [t.householdId], foreignColumns: [households.id] }),
+    expiresIdx: index('checkoutConfirmationsExpiresIdx').on(t.expiresAt),
+  }),
+);
+
+/**
+ * A Member's recently seen Instamart products (the `recentProducts` cache
+ * behind unavailable-product alternatives). Purely a cache: rows are
+ * reconstructible by searching again and are swept after the TTL.
+ */
+export const swiggyRecentProducts = pgTable(
+  'swiggy_recent_products',
+  {
+    userId: uuid('user_id').notNull(),
+    productId: varchar('product_id', { length: 128 }).notNull(),
+    product: jsonb('product').$type<unknown>().notNull(),
+    updatedAt: timestamp('updated_at', { mode: 'date', withTimezone: true })
+      .notNull()
+      .default(sql`now()`),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.userId, t.productId] }),
+    userFk: foreignKey({ columns: [t.userId], foreignColumns: [users.id] }),
+    updatedIdx: index('swiggyRecentProductsUpdatedIdx').on(t.updatedAt),
   }),
 );
