@@ -4,6 +4,26 @@ This document states exactly what is locally proven, what is feature-gated, and
 what still requires account-level production approval before V1 ships. It is
 the handoff evidence for issue 13.
 
+## Production rollout update (2026-09-09)
+
+Backend commit `aed4e65` is deployed successfully to Railway production
+(deployment `aafc1f7e-b489-46f4-a71e-329aee8f39b5`). Migration `0002` is applied.
+Migrations use `MIGRATION_DATABASE_URL`; application queries retain the
+restricted `DATABASE_URL` role. `/health` and `/ready` return 200, an expired
+OAuth callback returns 400, and unauthenticated `/v1/me` returns 401.
+
+The Swiggy production transport and token-encryption key are configured.
+Ordering remains disabled pending a real authenticated Swiggy flow test.
+The verified local suite has 402 passing tests and no skips, with typecheck,
+lint, formatting, and Expo configuration checks passing.
+
+EAS production has the API origin and production-build marker configured.
+Android production signing credentials were created. Mobile builds remain
+pending: Clerk still uses test keys, and iOS signing credentials are absent.
+Live Clerk configuration (or an explicit controlled-beta choice), Apple
+sign-in for iOS credentials, and user-assisted OTP testing remain necessary.
+Older dated sections below describe historical states, not this rollout.
+
 ## Capacity readiness update (2026-08-23)
 
 **Status: hardened for a controlled single-replica beta; not approved for a
