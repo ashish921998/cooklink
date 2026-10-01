@@ -8,6 +8,13 @@
       "when": 1785227530893,
       "tag": "0000_nifty_namorita",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1790837774000,
+      "tag": "0003_drop_duplicate_indexes_food_avoidances",
+      "breakpoints": true
     }
   ]
 }

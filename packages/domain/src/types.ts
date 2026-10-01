@@ -69,14 +69,6 @@ export interface Membership {
 
 export type NotificationLevel = 'all' | 'important' | 'muted';
 
-/** A food the household or a member chooses to avoid (issue 04 inputs). */
-export interface FoodAvoidance {
-  id: string;
-  householdId: HouseholdId;
-  userId: UserId | null; // null = household-level
-  food: string;
-}
-
 export interface RecipeIngredient {
   name: string;
   /** Stable pantry key for normalization, e.g. "tomato". Null = unnormalizable. */
