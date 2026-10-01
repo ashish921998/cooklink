@@ -144,7 +144,6 @@ export const memberships = pgTable(
   },
   (t) => ({
     householdIdx: index('membershipsHouseholdIdx').on(t.householdId),
-    userIdx: index('userIdx').on(t.userId),
     userHouseholdStatusIdx: uniqueIndex('userHouseholdStatusIdx').on(
       t.userId,
       t.householdId,
@@ -152,21 +151,6 @@ export const memberships = pgTable(
     ),
     userFk: foreignKey({ columns: [t.userId], foreignColumns: [users.id] }),
     householdFk: foreignKey({ columns: [t.householdId], foreignColumns: [households.id] }),
-  }),
-);
-
-export const foodAvoidances = pgTable(
-  'food_avoidances',
-  {
-    id: id(),
-    householdId: uuid('household_id').notNull(),
-    userId: uuid('user_id'),
-    food: varchar('food', { length: 64 }).notNull(),
-  },
-  (t) => ({
-    householdIdx: index('foodAvoidancesHouseholdIdx').on(t.householdId),
-    householdFk: foreignKey({ columns: [t.householdId], foreignColumns: [households.id] }),
-    userFk: foreignKey({ columns: [t.userId], foreignColumns: [users.id] }),
   }),
 );
 
@@ -227,7 +211,6 @@ export const plannedMeals = pgTable(
   },
   (t) => ({
     slotIdx: uniqueIndex('slotIdx').on(t.householdId, t.date, t.mealType),
-    householdDateIdx: index('householdDateIdx').on(t.householdId, t.date),
     householdFk: foreignKey({ columns: [t.householdId], foreignColumns: [households.id] }),
     recipeFk: foreignKey({ columns: [t.recipeId], foreignColumns: [recipes.id] }),
   }),
@@ -342,7 +325,6 @@ export const productMatches = pgTable(
   },
   (t) => ({
     householdCartIdx: uniqueIndex('householdCartIdx').on(t.householdId, t.cartItemId),
-    householdIdx: index('productMatchHouseholdIdx').on(t.householdId),
     householdFk: foreignKey({ columns: [t.householdId], foreignColumns: [households.id] }),
   }),
 );
